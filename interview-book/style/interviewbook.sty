@@ -1,0 +1,134 @@
+% style/interviewbook.sty — shared style for the Embedded Systems & Avionics
+% Interview Mastery book. Dense, recruiter-of-one layout: 10pt, tight lists,
+% styled Q&A, framed code listings, boxed scorecards.
+%
+% Compiles with pdfLaTeX on any full TeX Live / Overleaf. Packages used are
+% all mainstream (geometry, enumitem, titlesec, listings, tcolorbox, fancyhdr).
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{style/interviewbook}[2026/06/10 v1.0 Interview book style]
+
+% ---------- Base typography & density ----------
+\RequirePackage[a4paper,top=1.9cm,bottom=2.1cm,left=1.8cm,right=1.8cm]{geometry}
+\RequirePackage[T1]{fontenc}
+\RequirePackage[utf8]{inputenc}
+\RequirePackage{lmodern}
+\RequirePackage{microtype}
+\RequirePackage{xcolor}
+\RequirePackage{enumitem}
+\RequirePackage{titlesec}
+\RequirePackage{listings}
+\RequirePackage[most]{tcolorbox}
+\RequirePackage{fancyhdr}
+\RequirePackage[hidelinks]{hyperref}
+
+\definecolor{accent}{RGB}{0,82,147}        % deep avionics blue
+\definecolor{trapred}{RGB}{150,30,30}
+\definecolor{okgreen}{RGB}{20,110,50}
+\definecolor{codebg}{RGB}{246,247,248}
+\definecolor{coderule}{RGB}{190,195,200}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{2.5pt}
+\setlist{nosep,itemsep=1.5pt,leftmargin=1.5em}
+
+% ---------- Headings ----------
+\titleformat{\chapter}[block]
+  {\bfseries\huge}{\textcolor{accent}{\thechapter}\hspace{0.6em}}{0pt}{\huge}
+\titlespacing*{\chapter}{0pt}{-18pt}{14pt}
+
+\titleformat{\section}
+  {\Large\bfseries}{\thesection}{0.6em}{}[{\color{accent!55}\titlerule[0.9pt]}]
+\titlespacing*{\section}{0pt}{11pt}{5pt}
+
+\titleformat{\subsection}{\large\bfseries}{\thesubsection}{0.6em}{}
+\titlespacing*{\subsection}{0pt}{8pt}{3pt}
+
+% ---------- Headers / footers ----------
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\itshape\nouppercase{\leftmark}}
+\fancyhead[R]{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[C]{\small\thepage}%
+  \renewcommand{\headrulewidth}{0pt}}
+
+% ---------- Inline code ----------
+\newcommand{\code}[1]{\texttt{#1}}
+
+% ---------- C code listings ----------
+\lstdefinestyle{embeddedC}{
+  language=C,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\bfseries\color{accent},
+  commentstyle=\itshape\color{okgreen!85!black},
+  stringstyle=\color{orange!65!black},
+  directivestyle=\color{purple!60!black},
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  numbersep=7pt,
+  frame=single,
+  rulecolor=\color{coderule},
+  backgroundcolor=\color{codebg},
+  breaklines=true,
+  showstringspaces=false,
+  tabsize=4,
+  columns=fullflexible,
+  keepspaces=true,
+  aboveskip=5pt,
+  belowskip=5pt
+}
+\lstnewenvironment{cgym}{\lstset{style=embeddedC}}{}
+
+% ---------- Q&A machinery ----------
+% \question{Q2.3}{How do you ...?}  -> styled question header; answer follows
+% as ordinary prose.
+\newcommand{\question}[2]{%
+  \par\medskip\noindent
+  {\color{accent}\rule[-1.5pt]{3pt}{10pt}}\hspace{6pt}%
+  \textbf{#1 --- #2}\par\smallskip\noindent\ignorespaces}
+
+% \trap  -> bold red lead-in for the Tier-3 "trap it defends against"
+\newcommand{\trap}{\textbf{\color{trapred}The trap:}\ }
+
+% Tier banner
+\newcommand{\tierbanner}[2]{%
+  \subsection*{#1}%
+  {\small\itshape #2\par}\vspace{2pt}}
+
+% ---------- Coding Gym machinery ----------
+\newcounter{gymproblem}[chapter]
+\newenvironment{gymproblem}[1]{%
+  \refstepcounter{gymproblem}%
+  \par\bigskip
+  {\color{accent!70}\hrule height 0.8pt}\smallskip
+  \subsection*{Problem \thechapter.\arabic{gymproblem} --- #1}%
+  \ignorespaces}{\par\medskip}
+
+\newcommand{\attempt}{%
+  \begin{center}
+  \begin{tcolorbox}[enhanced,colback=yellow!14,colframe=orange!75!black,
+      width=0.86\linewidth,boxrule=0.9pt,sharp corners,halign=center,
+      top=3pt,bottom=3pt]
+    {\scshape Attempt before reading on} --- minimum 10 minutes on paper.
+  \end{tcolorbox}
+  \end{center}}
+
+\newcommand{\followups}{\smallskip\noindent\textbf{Interviewer follow-up variants.}\par}
+
+% ---------- Boxes ----------
+\newtcolorbox{partnote}{enhanced,breakable,colback=accent!5,colframe=accent!60,
+  boxrule=0.8pt,top=4pt,bottom=4pt}
+
+\newtcolorbox{resumelink}{enhanced,breakable,colback=okgreen!6,
+  colframe=okgreen!70!black,boxrule=0.9pt,
+  title=\textbf{Link to Her Resume --- ready sentences},top=4pt,bottom=4pt}
+
+\newtcolorbox{scorecard}{enhanced,breakable,colback=accent!4,colframe=accent!70,
+  boxrule=0.9pt,
+  title=\textbf{Self-Test Scorecard --- 10 rapid-fire, pass mark 8/10. Answer
+    out loud, then check the key.},top=4pt,bottom=4pt}
+
+\newtcolorbox{answerkey}{enhanced,breakable,colback=black!3,colframe=black!45,
+  boxrule=0.8pt,title=\textbf{Answer key},top=4pt,bottom=4pt}
+
+\endinput

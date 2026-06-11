@@ -1,4 +1,7 @@
-# Build artifacts — regenerate from source, never commit
+# Build artifacts — regenerate from source, never commit.
+# Ignore everything generated under build/, but keep the build script itself.
+build/*
+!build/build.sh
 *.pdf
 
 # LaTeX intermediates
@@ -6,6 +9,13 @@
 *.log
 *.out
 *.toc
+*.lof
+*.lot
 *.fls
 *.fdb_latexmk
 *.synctex.gz
+*.bbl
+*.blg
+*.idx
+*.ilg
+*.ind

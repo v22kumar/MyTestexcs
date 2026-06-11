@@ -1,0 +1,57 @@
+% main.tex — Embedded Systems & Avionics Interview Mastery (book master)
+%
+% Build:   bash build/build.sh          (or open in Overleaf, compiler: pdfLaTeX)
+% Output:  build/book.pdf  — a BUILD ARTIFACT, never committed.
+%
+% Add a chapter: create chapters/chNN_<name>.tex containing a single \chapter,
+% then add an \include line below. Keep PLAN.md's order.
+\documentclass[10pt,a4paper,oneside]{book}
+\usepackage{style/interviewbook}
+
+\title{Embedded Systems \& Avionics Interview Mastery}
+\author{Preparation book for Sushmita Telasang}
+\date{}
+
+\begin{document}
+
+% ---------- Title page ----------
+\begin{titlepage}
+  \centering
+  \vspace*{3cm}
+  {\Huge\bfseries Embedded Systems \& Avionics\\[4pt] Interview Mastery\par}
+  \vspace{1.2cm}
+  {\Large UAV Flight Control \textbullet{} DFCC \textbullet{} CCDL/SPIL
+   \textbullet{} Embedded C \textbullet{} CAN \textbullet{} V\&V\par}
+  \vspace{2cm}
+  {\large 10\% $\rightarrow$ 100\% interview readiness\par}
+  \vspace{0.4cm}
+  {\large $\sim$50\% Q\&A \quad\textbullet\quad $\sim$40\% coding
+   \quad\textbullet\quad $\sim$10\% primer\par}
+  \vfill
+  {\small Built per \code{PLAN.md}. Chapters 15--16 are written only from
+   \code{inputs/INTAKE.md} --- no fabricated project facts.\par}
+  \vspace{1cm}
+\end{titlepage}
+
+\tableofcontents
+
+% ---------- Chapters (uncomment as they are written) ----------
+\include{chapters/ch01_embedded_c}
+% \include{chapters/ch02_memory_toolchain}
+% \include{chapters/ch03_arm_architecture}
+% \include{chapters/ch04_interrupts_timers_dma}
+% \include{chapters/ch05_uart_rs_serial}
+% \include{chapters/ch06_spi_i2c}
+% \include{chapters/ch07_can_bus}
+% \include{chapters/ch08_avionics_buses}
+% \include{chapters/ch09_rtos_realtime}
+% \include{chapters/ch10_control_pid}
+% \include{chapters/ch11_debugging_lab}
+% \include{chapters/ch12_vnv_do178}
+% \include{chapters/ch13_coding_gym}
+% \include{chapters/ch14_python_automation}
+% \include{chapters/ch15_project_deepdives}
+% \include{chapters/ch16_behavioral_company}
+% \include{chapters/ch17_mock_interviews}
+
+\end{document}
