@@ -1,0 +1,700 @@
+% chapters/ch10_control_pid.tex — Chapter 10: Control Systems & PID
+% Scope (PLAN.md): open vs closed loop, P/I/D intuition, tuning incl.
+% Ziegler-Nichols, overshoot/rise/settling/steady-state error, sensor feedback
+% & noise filtering, discrete PID in C, servo position-loop walkthrough.
+% Budget 30 pp, mix 20 Q&A / 6 code / 4 concept.
+% All snippets verified gcc -Wall -Wextra -std=c11 -lm (zero warnings).
+
+\chapter{Control Systems \& PID}
+\label{ch:control-pid}
+
+\begin{partnote}
+\textbf{Scope} --- open vs closed loop $\rightarrow$ the P, I, and D terms
+(what each fixes and breaks) $\rightarrow$ tuning, including Ziegler--Nichols
+$\rightarrow$ overshoot / rise time / settling time / steady-state error
+$\rightarrow$ sensor feedback \& noise filtering $\rightarrow$ a discrete PID in
+C $\rightarrow$ a servo position-loop walkthrough. Control theory underpins
+closed-loop actuator and servo work; this chapter is answerable at the depth a
+hardware/embedded interviewer expects --- intuition plus a working discrete
+controller --- without a controls-PhD detour.
+\end{partnote}
+
+A PID controller is the most-deployed control algorithm in the world, and the
+most-asked control question in an embedded interview. The goal here is not to
+derive transfer functions but to \emph{reason} about a loop: why it oscillates,
+why it never quite reaches target, what each gain does, and how to write and
+tune one in C on a microcontroller.
+
+%=====================================================================
+\section{Primer}
+%=====================================================================
+
+\subsection{Open loop vs closed loop}
+
+\textbf{Open loop} commands an actuator with no measurement of the result ---
+``run the motor at 60\% duty'' --- simple, but it can't correct for disturbances
+(load, friction, supply sag) and has no idea whether it hit the target.
+\textbf{Closed loop} measures the output, computes the \textbf{error}
+(setpoint $-$ measurement), and feeds it back to drive the actuator so the error
+shrinks. Feedback buys disturbance rejection and accuracy at the cost of
+complexity and the risk of \emph{instability} (a badly-tuned loop oscillates or
+diverges). Every servo position loop, temperature controller, and motor-speed
+regulator is closed loop.
+
+\subsection{The three terms}
+
+PID sums three responses to the error $e$:
+\[
+u(t) = K_p\,e + K_i\!\int e\,dt + K_d\,\frac{de}{dt}.
+\]
+\textbf{Proportional} ($K_p$) reacts to the \emph{present} error --- bigger
+error, bigger push. Alone it leaves a \emph{steady-state error} (it needs some
+error to produce output) and, pushed high, causes overshoot and oscillation.
+\textbf{Integral} ($K_i$) accumulates \emph{past} error, driving the
+steady-state error to zero --- but it adds lag and can \emph{wind up}
+(over-accumulate) causing large overshoot. \textbf{Derivative} ($K_d$)
+anticipates \emph{future} error from its rate of change, adding damping that
+reduces overshoot and settling time --- but it amplifies sensor noise. The art
+is balancing them.
+
+\subsection{Response metrics}
+
+A loop's quality is judged by its \textbf{step response} (how it reacts when the
+setpoint jumps): \textbf{rise time} (how fast it first reaches the target),
+\textbf{overshoot} (how far it exceeds target, as a percentage),
+\textbf{settling time} (how long until it stays within a band, e.g.\ $\pm$2\%,
+of target), and \textbf{steady-state error} (the residual offset once settled).
+These trade off: more aggressive (faster rise) usually means more overshoot, so
+tuning is choosing the right compromise for the application --- a camera gimbal
+wants no overshoot, a fast positioner may tolerate a little.
+
+\subsection{Discretisation, noise, and windup}
+
+On an MCU the loop runs at a fixed \textbf{sample period} $dt$ (the timer-driven
+control frequency from Chapter 4), so the integral becomes a running sum
+($\times dt$) and the derivative a difference ($/dt$). Three practical
+must-dos: (1) \textbf{filter the measurement} (a low-pass / moving average)
+before the derivative, or noise is amplified into the output; (2) \textbf{take
+the derivative on the measurement, not the error}, to avoid a ``derivative
+kick'' spike when the setpoint steps; (3) \textbf{anti-windup} --- stop the
+integral accumulating while the actuator is saturated, or it overshoots badly on
+recovery. A correct embedded PID is these three fixes plus the three terms.
+
+%=====================================================================
+\section{Q\&A Bank}
+%=====================================================================
+
+\tierbanner{Tier 1 --- Screening (phone / HR-technical)}%
+{Two to four sentences.}
+
+\question{Q1.1}{Open loop vs closed loop?}
+Open loop commands the actuator without measuring the result, so it can't
+correct for disturbances; closed loop measures the output, computes the error
+versus the setpoint, and feeds it back to drive the error to zero. Closed loop
+gives accuracy and disturbance rejection but can be unstable if poorly tuned.
+
+\question{Q1.2}{What does the P term do?}
+Proportional control outputs in proportion to the present error --- larger
+error, larger correction. It's the main driving term, but alone it leaves a
+residual steady-state error and, if too high, causes overshoot and oscillation.
+
+\question{Q1.3}{What does the I term do?}
+Integral accumulates past error over time, so it keeps pushing until the error
+is exactly zero --- eliminating steady-state error. Its downside is added lag and
+integral windup, which cause overshoot.
+
+\question{Q1.4}{What does the D term do?}
+Derivative responds to the rate of change of error, anticipating where it's
+heading and adding damping --- reducing overshoot and settling time. It amplifies
+measurement noise, so it usually needs a filtered input.
+
+\question{Q1.5}{What is overshoot?}
+How far the response exceeds the target before settling, usually expressed as a
+percentage of the setpoint. Too much overshoot can damage mechanisms or
+destabilise the system; some applications require zero overshoot.
+
+\question{Q1.6}{What is steady-state error?}
+The residual difference between the setpoint and the actual settled output. A
+pure-P controller leaves a steady-state error; adding integral action removes
+it.
+
+\question{Q1.7}{What is settling time?}
+The time for the response to enter and stay within a defined band (commonly
+$\pm$2\% or $\pm$5\%) of the final value. It measures how quickly the loop
+``finishes'' reacting to a change.
+
+\question{Q1.8}{Why filter a sensor before the derivative term?}
+Because the derivative amplifies high-frequency content, so raw sensor noise
+becomes large, jittery output that can buzz the actuator. A low-pass filter (or
+moving average) smooths the measurement so the derivative reflects real motion,
+not noise.
+
+\question{Q1.9}{What is integral windup?}
+When the actuator saturates (can't move further) but the integral keeps
+accumulating error, building a large value that causes a big overshoot when the
+error finally reverses. Anti-windup limits or freezes the integral while
+saturated.
+
+\question{Q1.10}{What sets the control loop's sample rate?}
+A fixed periodic timer interrupt (Chapter 4) runs the PID at a constant $dt$;
+the rate must be fast enough relative to the plant's dynamics (a common rule of
+thumb is 10--20$\times$ the loop bandwidth) and have low jitter, since the
+integral and derivative math assume a constant period.
+
+\tierbanner{Tier 2 --- Core technical (panel round)}%
+{A short paragraph.}
+
+\question{Q2.1}{Walk through tuning a PID from scratch.}
+Start with $K_i = K_d = 0$ and raise $K_p$ until the response is fast but begins
+to oscillate; back it off slightly. Add $K_i$ to remove the steady-state error,
+increasing it until the offset is eliminated without too much overshoot/
+sluggishness. Add $K_d$ to damp the overshoot and shorten settling, increasing
+until noise starts to show in the output, then back off. Iterate. This manual
+method (or a structured one like Ziegler--Nichols) trades the classic
+fast-vs-stable compromise; you tune to the application's priority (no overshoot
+vs fast response).
+
+\question{Q2.2}{Explain Ziegler--Nichols tuning.}
+A structured method: with only P active, raise $K_p$ until the loop oscillates
+with a steady amplitude --- that gain is the \textbf{ultimate gain} $K_u$ and the
+oscillation period is $T_u$. Then set the PID gains from standard ratios: for a
+classic PID, $K_p = 0.6K_u$, $K_i = 1.2K_u/T_u$, $K_d = 0.075K_uT_u$ (equivalently
+$T_i = T_u/2$, $T_d = T_u/8$). It gives a quick, repeatable starting point ---
+typically a bit aggressive (~25\% overshoot) --- which you then refine. Its
+limitation is that driving a real system into sustained oscillation may be
+unsafe, so it's not always usable on flight hardware.
+
+\question{Q2.3}{Why does a proportional-only controller have steady-state
+error?}
+Because its output is $K_p \times$ error, so to hold any non-zero output
+(needed to counter gravity, friction, or a load) it \emph{requires} a non-zero
+error --- if the error were zero, the output would be zero and the system would
+sag. The error settles at exactly the value whose $K_p$ product holds the load.
+Integral action fixes this: it keeps integrating that residual error until its
+own term supplies the needed output, allowing the error to reach zero.
+
+\question{Q2.4}{What is derivative kick and how do you avoid it?}
+When the setpoint changes in a step, the error jumps instantly, so its
+derivative is a huge spike --- the D term produces a violent output transient
+(``kick'') that can slam the actuator. The fix is to compute the derivative on
+the \emph{measurement} instead of the error: since the measured value can't jump
+instantaneously, there's no spike on a setpoint change, while the damping
+behaviour during motion is unchanged (you negate it, because $d(\text{error})/dt
+= -d(\text{measurement})/dt$ when the setpoint is constant).
+
+\question{Q2.5}{Describe a servo position control loop.}
+The setpoint is the desired angle/position; a sensor (encoder, potentiometer,
+resolver) measures the actual position; the PID computes a command from the
+error; that command becomes a PWM duty (Chapter 4) driving the motor/actuator,
+which moves the load, changing the measured position --- closing the loop. Often
+it's a cascaded loop: an outer position loop sets the target for an inner
+velocity (and sometimes current) loop, each tuned for its own bandwidth. This is
+the closed-loop actuator structure behind a CAN servo (Chapter 7).
+
+\question{Q2.6}{How do you implement anti-windup?}
+Two common methods. \textbf{Clamping/conditional integration}: only accumulate
+into the integral when the output is \emph{not} saturated (or when integrating
+would move the output away from the saturated rail), so the integral can't build
+up while the actuator is maxed out. \textbf{Back-calculation}: feed the
+difference between the saturated and unsaturated output back to bleed the
+integral down. Either way the integral reflects achievable output, so the loop
+recovers cleanly from saturation without a huge overshoot --- essential whenever
+the actuator has limited range.
+
+\question{Q2.7}{How do you choose the control loop frequency?}
+Fast enough that the plant looks ``continuous'' to the controller --- a common
+guideline is 10--20$\times$ the desired closed-loop bandwidth (or the fastest
+plant time constant), and fast relative to disturbance frequencies. But faster
+costs CPU and amplifies derivative noise, and the sensor's own update rate and
+the actuator's response set a ceiling. You also need \emph{low jitter}
+(Chapter 4), because the discrete integral/derivative assume a constant $dt$;
+a 1\,kHz timer-driven loop is typical for a servo.
+
+\question{Q2.8}{Why must the sample period be constant (low jitter)?}
+Because the discrete PID multiplies the integral by $dt$ and divides the
+derivative by $dt$ assuming a fixed period; if $dt$ varies frame to frame, the
+effective $K_i$ and $K_d$ wander, degrading stability and adding noise to the
+output. That's why the loop runs from a dedicated periodic timer interrupt with
+high priority and short execution, not from a software-delay loop --- tying
+directly to the real-time determinism of Chapters 4 and 9.
+
+\tierbanner{Tier 3 --- Trap \& depth (principal-engineer level)}%
+{A paragraph plus the trap.}
+
+\question{Q3.1}{Your loop oscillates. Walk through diagnosing whether it's too
+much P, too much I, too little D, or something physical.}
+Read the \emph{character} of the oscillation. Fast oscillation that grows with
+$K_p$ points to excess proportional gain (reduce $K_p$ or add $K_d$ damping). A
+slow oscillation/hunting that appears when you added integral suggests too much
+$K_i$ (or windup) --- the integral overshoots, reverses, overshoots. Oscillation
+that's actually high-frequency jitter on the output usually means $K_d$
+amplifying sensor noise (filter the measurement, reduce $K_d$). But also rule out
+\emph{physical} causes: mechanical backlash/compliance, actuator saturation
+cycling, a sample rate too slow for the plant, or transport delay (a pure time
+delay makes \emph{any} high-gain loop unstable). \trap the trap is reflexively
+turning knobs; the disciplined approach identifies the oscillation frequency and
+amplitude (scope the measurement), relates it to which term or physical effect
+produces that signature, and checks $dt$/saturation/delay before re-tuning ---
+the same instrument-led method as the protocol chapters.
+
+\question{Q3.2}{Integral action removes steady-state error --- so why not just
+use a huge $K_i$?}
+Because integral adds \emph{phase lag}: it responds to accumulated past error,
+so it's always ``behind,'' and too much of it makes the loop sluggish and
+oscillatory, and it winds up badly against saturation. A large $K_i$ removes the
+offset \emph{faster} but at the cost of large overshoot and reduced stability
+margin --- it can even destabilise the loop. The right amount is the minimum that
+eliminates the offset within the required settling time, paired with anti-windup.
+\trap the trap is treating ``$I$ kills steady-state error'' as ``more $I$ is
+better.'' Each term has a cost: $P$ $\rightarrow$ overshoot, $I$ $\rightarrow$
+lag/windup, $D$ $\rightarrow$ noise. Senior answers name the \emph{cost} of each
+term, not just its benefit.
+
+\question{Q3.3}{When is a PID the wrong tool, and what would you reach for
+instead?}
+PID assumes a roughly linear, single-input/single-output plant with modest
+delay. It struggles with: significant \textbf{transport delay} (use a Smith
+predictor or model-based control), strongly \textbf{nonlinear} plants (gain
+scheduling --- different PID gains per operating point --- or feedback
+linearisation), \textbf{coupled multi-variable} systems (state-space / LQR /
+MPC), and cases where you can \emph{model} the disturbance (feed-forward added to
+the PID dramatically improves tracking). For a flight control law specifically,
+the design is typically state-space/gain-scheduled, not a lone PID. \trap the
+trap is forcing PID onto everything; the depth is knowing its assumptions and
+naming the right alternative --- and that adding \textbf{feed-forward} (command
+the known steady output, let PID trim the rest) often beats tuning PID harder.
+Saying ``I verify the control law; the law design was the systems team's'' is
+also the honest boundary the resume implies.
+
+\question{Q3.4}{Two channels run the same PID on the same sensor but produce
+slightly different outputs each frame. Is that a fault?}
+Not necessarily --- it's expected (Chapter 8). Each channel's ADC quantises
+differently, sensor noise differs, floating-point rounding and timing jitter
+differ, and the integral state can diverge slightly over time even from
+identical inputs. So a redundant/voting system must compare channel outputs with
+a \textbf{tolerance band} and \textbf{persistence}, not exact equality, before
+declaring a channel faulty --- and may periodically \emph{re-synchronise} the
+integral states across channels via the CCDL to stop slow divergence. \trap the
+trap is expecting bit-identical outputs from redundant PID channels and
+nuisance-tripping on normal divergence; the real design bounds acceptable
+divergence and resynchronises integrator state --- exactly the CCDL
+integrity/voting verification on the resume, now connected to the control law it
+protects.
+
+%=====================================================================
+\section{Coding Gym}
+%=====================================================================
+
+\begin{partnote}
+Six host-compilable problems (verified under
+\code{gcc -Wall -Wextra -std=c11 -lm}) building a production-quality discrete
+PID step by step: the basic controller, anti-windup, derivative-on-measurement,
+the sensor filter, Ziegler--Nichols gains, and step-response metrics.
+\end{partnote}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Discrete PID controller}
+
+\textbf{Problem.} Implement one step of a positional discrete PID given
+setpoint, measurement, and sample period.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Integral $+= e\cdot dt$; derivative $=(e-e_{\text{prev}})/dt$; output is
+  the weighted sum.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+typedef struct { double kp, ki, kd, integ, prev_err; } pid_t;
+
+static double pid_step(pid_t *p, double setpoint, double meas, double dt) {
+    double err   = setpoint - meas;
+    p->integ    += err * dt;                  /* accumulate past error  */
+    double deriv = (err - p->prev_err) / dt;  /* rate of change         */
+    p->prev_err  = err;
+    return p->kp * err + p->ki * p->integ + p->kd * deriv;
+}
+
+int main(void) {
+    pid_t p = {2.0, 0.5, 0.1, 0, 0};
+    printf("u=%.3f\n", pid_step(&p, 1.0, 0.0, 0.01));   /* 12.005 */
+    return 0;
+}
+\end{cgym}
+
+This is the textbook positional form: each call computes the error, updates the
+integral and derivative using the fixed $dt$, and returns the actuator command.
+It runs from the periodic control-loop timer (Chapter 4). The next three problems
+turn this naive version into one that survives real hardware --- saturation,
+setpoint steps, and sensor noise.
+
+\followups
+\begin{enumerate}
+\item \emph{``Velocity (incremental) form?''} $\rightarrow$ Compute $\Delta u$
+  from successive errors; useful when the actuator integrates (e.g.\ a stepper).
+\item \emph{``What are the units of the output?''} $\rightarrow$ Whatever the
+  actuator takes --- scale/clamp to PWM duty or current command.
+\item \emph{``Why positional vs velocity form?''} $\rightarrow$ Positional is
+  intuitive; velocity form has natural bumpless transfer and simpler windup
+  handling.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{PID with anti-windup and output clamping}
+
+\textbf{Problem.} Add output saturation limits and stop the integral winding up
+while saturated.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Only integrate when the (unsaturated) output is within limits; clamp the
+  final output.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+typedef struct { double kp, ki, kd, integ, prev_err, omin, omax; } pidaw_t;
+
+static double pid_aw_step(pidaw_t *p, double sp, double meas, double dt) {
+    double err   = sp - meas;
+    double deriv = (err - p->prev_err) / dt;
+    p->prev_err  = err;
+    double out_unsat = p->kp * err + p->ki * (p->integ + err * dt) + p->kd * deriv;
+    if (out_unsat <= p->omax && out_unsat >= p->omin)   /* conditional integration */
+        p->integ += err * dt;
+    double out = p->kp * err + p->ki * p->integ + p->kd * deriv;
+    if (out > p->omax) out = p->omax;                   /* clamp */
+    else if (out < p->omin) out = p->omin;
+    return out;
+}
+
+int main(void) {
+    pidaw_t p = {2, 0.5, 0.1, 0, 0, -1.0, 1.0};
+    double o = 0;
+    for (int i = 0; i < 5; i++) o = pid_aw_step(&p, 10.0, 0.0, 0.01);
+    printf("out=%.3f (clamped to 1.0)\n", o);   /* 1.000 */
+    return 0;
+}
+\end{cgym}
+
+With a large error (setpoint 10, output limited to $\pm$1) the actuator
+saturates; \emph{conditional integration} freezes the integral while saturated
+so it can't wind up, and the output is clamped to the physical limit. Without
+this, the integral would balloon and cause a huge overshoot when the
+measurement finally catches up --- the classic windup failure (Q1.9, Q2.6).
+Every real actuator has limits, so anti-windup is mandatory, not optional.
+
+\followups
+\begin{enumerate}
+\item \emph{``Back-calculation anti-windup instead?''} $\rightarrow$ Bleed the
+  integral by $(out_{\text{sat}} - out_{\text{unsat}})\cdot K_{aw}$.
+\item \emph{``Why integrate the \emph{unsaturated} check?''} $\rightarrow$ To
+  decide whether adding more integral would push further into saturation.
+\item \emph{``Asymmetric limits?''} $\rightarrow$ \code{omin}/\code{omax} can
+  differ (e.g.\ a motor that brakes harder than it drives).
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Derivative on measurement (no kick)}
+
+\textbf{Problem.} Compute the derivative term from the measurement instead of
+the error to avoid derivative kick on setpoint steps.
+
+\textbf{Hints.}
+\begin{itemize}
+\item $d(\text{error})/dt = -d(\text{meas})/dt$ for a constant setpoint; track
+  \code{prev\_meas}.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+typedef struct { double kp, ki, kd, integ, prev_meas; } piddm_t;
+
+static double pid_dm_step(piddm_t *p, double sp, double meas, double dt) {
+    double err   = sp - meas;
+    p->integ    += err * dt;
+    double deriv = -(meas - p->prev_meas) / dt;   /* derivative of measurement */
+    p->prev_meas = meas;
+    return p->kp * err + p->ki * p->integ + p->kd * deriv;
+}
+
+int main(void) {
+    piddm_t p = {2, 0.5, 0.1, 0, 0};
+    printf("u=%.3f\n", pid_dm_step(&p, 1.0, 0.0, 0.01));   /* 2.005 */
+    return 0;
+}
+\end{cgym}
+
+When the operator steps the setpoint, error jumps but the \emph{measurement}
+doesn't, so deriving from the measurement gives no spike --- no violent actuator
+``kick'' (Q2.4). During actual motion the measurement changes smoothly and the
+damping is identical, because with a constant setpoint the two derivatives differ
+only in sign (hence the negation). Compare the output here (2.005) with the
+basic version's (12.005) on the same setpoint step: the kick is gone. This is a
+standard feature of industrial PID blocks.
+
+\followups
+\begin{enumerate}
+\item \emph{``Derivative on error vs measurement during tracking --- same?''}
+  $\rightarrow$ Identical for constant setpoint; only setpoint changes differ.
+\item \emph{``Combine with a filter on \code{meas}.''} $\rightarrow$ Yes ---
+  filter then differentiate (next problem) to also kill noise.
+\item \emph{``Setpoint weighting?''} $\rightarrow$ A generalisation that scales
+  how much P/D see the setpoint vs measurement.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Low-pass filter the sensor (EMA)}
+
+\textbf{Problem.} Implement an exponential moving-average filter to smooth a
+noisy measurement before the derivative.
+
+\textbf{Hints.}
+\begin{itemize}
+\item \code{y += alpha*(x - y)}; smaller \code{alpha} = more smoothing.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+static double ema(double prev, double sample, double alpha) {
+    return prev + alpha * (sample - prev);   /* 0<alpha<=1; smaller = smoother */
+}
+
+int main(void) {
+    double y = 0;
+    double in[] = {0, 1, 1, 1, 1};
+    for (int i = 0; i < 5; i++) y = ema(y, in[i], 0.5);
+    printf("filtered=%.4f\n", y);   /* 0.9375 -> converging to 1 */
+    return 0;
+}
+\end{cgym}
+
+The EMA is the cheapest useful low-pass filter --- one multiply-add, one state
+variable, no buffer (unlike a moving average). \code{alpha} sets the cutoff: near
+1 follows the input closely (little filtering), near 0 heavily smooths (more lag).
+You filter the measurement \emph{before} the derivative term so the D action
+responds to real motion, not sensor noise (Q1.8) --- the trade is that filtering
+adds lag, which can reduce stability, so you pick the lightest filter that tames
+the noise.
+
+\followups
+\begin{enumerate}
+\item \emph{``Relate \code{alpha} to cutoff frequency.''} $\rightarrow$
+  \code{alpha = dt/(RC+dt)}; choose RC for the desired corner.
+\item \emph{``Why not a long moving average?''} $\rightarrow$ More lag and RAM;
+  EMA gives similar smoothing with $O(1)$ state.
+\item \emph{``Filter lag hurts the loop --- mitigation?''} $\rightarrow$ Keep
+  the filter light, or filter only the D path, not the whole measurement.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Ziegler--Nichols gains}
+
+\textbf{Problem.} Compute classic PID gains from the ultimate gain $K_u$ and
+oscillation period $T_u$.
+
+\textbf{Hints.}
+\begin{itemize}
+\item $K_p=0.6K_u$, $K_i=1.2K_u/T_u$, $K_d=0.075K_uT_u$.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+static void zn_pid(double Ku, double Tu, double *kp, double *ki, double *kd) {
+    *kp = 0.6 * Ku;
+    *ki = 1.2 * Ku / Tu;
+    *kd = 0.075 * Ku * Tu;
+}
+
+int main(void) {
+    double kp, ki, kd;
+    zn_pid(4.0, 2.0, &kp, &ki, &kd);
+    printf("kp=%.3f ki=%.3f kd=%.3f\n", kp, ki, kd);   /* 2.400 2.400 0.600 */
+    return 0;
+}
+\end{cgym}
+
+You find $K_u$ by raising P-only gain until the loop oscillates with constant
+amplitude, and $T_u$ is that oscillation's period; the ratios then give a
+working PID (Q2.2). It's a fast, repeatable \emph{starting point} --- typically a
+touch aggressive (~25\% overshoot) --- that you then refine by hand. The caveat
+for flight hardware: deliberately driving the system into sustained oscillation
+to measure $K_u$ may be unsafe, so model-based tuning or careful step-response
+methods are often used instead.
+
+\followups
+\begin{enumerate}
+\item \emph{``PI-only ZN ratios?''} $\rightarrow$ $K_p=0.45K_u$,
+  $K_i=0.54K_u/T_u$ --- when D-noise is a problem.
+\item \emph{``Why is ZN often too aggressive?''} $\rightarrow$ It targets
+  quarter-amplitude decay; many apps want less overshoot --- detune from here.
+\item \emph{``Alternative that doesn't need oscillation?''} $\rightarrow$
+  Step-response (Cohen--Coon) or model-based tuning.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Step-response metrics}
+
+\textbf{Problem.} From a sampled step response, compute percent overshoot and
+2\% settling time.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Overshoot = (peak $-$ setpoint)/setpoint; settling = last time it leaves
+  the $\pm$2\% band.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+#include <math.h>
+
+static void step_metrics(const double *y, int n, double dt, double setpoint,
+                         double *overshoot_pct, double *settling_time) {
+    double peak = 0;
+    for (int i = 0; i < n; i++) if (y[i] > peak) peak = y[i];
+    *overshoot_pct = (peak - setpoint) / setpoint * 100.0;
+    double band = 0.02 * setpoint;
+    int settle_idx = n - 1;
+    for (int i = n - 1; i >= 0; i--)
+        if (fabs(y[i] - setpoint) > band) { settle_idx = i + 1; break; }
+    *settling_time = settle_idx * dt;
+}
+
+int main(void) {
+    double y[] = {0, 0.5, 1.2, 1.1, 1.02, 1.0, 1.0, 1.0};
+    double os, ts;
+    step_metrics(y, 8, 0.1, 1.0, &os, &ts);
+    printf("overshoot=%.1f%% settling=%.1fs\n", os, ts);   /* 20.0% 0.5s */
+    return 0;
+}
+\end{cgym}
+
+This response peaks at 1.2 (20\% overshoot) and last leaves the $\pm$2\% band at
+$t=0.5$\,s. These are the numbers you quote to characterise a tuned loop, and the
+ones you watch on the scope while tuning --- pushing for faster settling usually
+increases overshoot, so you tune to the application's tolerance. Computing them
+on-target from a logged step lets you verify the controller meets its spec
+objectively rather than by eye.
+
+\followups
+\begin{enumerate}
+\item \emph{``Add rise time (10--90\%).''} $\rightarrow$ Find the times crossing
+  0.1 and 0.9 of setpoint; difference is rise time.
+\item \emph{``Steady-state error from this array?''} $\rightarrow$ setpoint
+  minus the final settled value.
+\item \emph{``Why measure rather than eyeball?''} $\rightarrow$ Objective,
+  repeatable pass/fail against the requirement --- the V\&V mindset (Chapter 12).
+\end{enumerate}
+\end{gymproblem}
+
+%=====================================================================
+\section{Link to Her Resume}
+%=====================================================================
+
+\begin{resumelink}
+\textbf{Closed-loop fundamentals:} ``My academic project was a closed-loop
+PLC automation system with sensor feedback, and control systems was core
+coursework. I can reason about a loop --- why it overshoots or never reaches
+target, what each PID term costs, and how to write a discrete PID with
+anti-windup and a filtered derivative on a microcontroller at a fixed,
+low-jitter sample rate.''
+
+\medskip
+\textbf{Servo / actuator context:} ``A CAN servo is a closed-loop position
+controller --- setpoint in, encoder feedback, PID to a PWM command, often
+cascaded position/velocity loops. I understand that structure and how the
+control frequency and jitter (from the real-time timer) affect it.''
+
+\medskip
+\textbf{Honest boundary:} ``I verify control-law \emph{outputs} and the loop's
+behaviour; designing the flight control law itself is the systems team's work,
+and that's typically state-space/gain-scheduled rather than a lone PID --- but I
+can explain how I'd verify its response (overshoot, settling, steady-state
+error) objectively.''
+
+\medskip
+\small Maps to the resume's control-systems coursework, the closed-loop
+academic project, and DFCC/servo context --- with an honest scope boundary on
+control-law \emph{design} vs \emph{verification}. Deep project scripting is
+Chapter 15, from \code{inputs/INTAKE.md} only.
+\end{resumelink}
+
+%=====================================================================
+\section{Self-Test Scorecard}
+%=====================================================================
+
+\begin{scorecard}
+\begin{enumerate}
+\item Open vs closed loop --- what does feedback buy and risk?
+\item What does each of P, I, D respond to (present/past/future error)?
+\item Why does P-only control leave a steady-state error?
+\item What removes steady-state error, and what's its cost?
+\item What is derivative kick and the fix?
+\item What is integral windup and how do you prevent it?
+\item State the Ziegler--Nichols classic-PID gain ratios from $K_u$, $T_u$.
+\item Why must the control sample period be constant?
+\item Name two response metrics and the trade-off between them.
+\item When is a PID the wrong tool, and what replaces it?
+\end{enumerate}
+\end{scorecard}
+
+\begin{answerkey}
+\begin{enumerate}
+\item Closed loop measures output and corrects error (accuracy + disturbance
+  rejection); the risk is instability if poorly tuned. Open loop can't correct
+  at all.
+\item P = present error, I = accumulated past error, D = rate of change
+  (anticipates future).
+\item Its output is $K_p\times$error, so holding a non-zero output requires a
+  non-zero error.
+\item Integral action; its cost is added lag and windup (overshoot).
+\item A spike from the error's derivative on a setpoint step; compute the
+  derivative on the measurement instead.
+\item The integral accumulating while the actuator is saturated; freeze/limit
+  it (conditional integration or back-calculation).
+\item $K_p=0.6K_u$, $K_i=1.2K_u/T_u$, $K_d=0.075K_uT_u$.
+\item The discrete integral ($\times dt$) and derivative ($/dt$) assume a fixed
+  period; jitter makes effective $K_i$/$K_d$ wander.
+\item E.g.\ overshoot vs settling/rise time --- faster response generally costs
+  more overshoot.
+\item For large delay, strong nonlinearity, or coupled MIMO plants; use
+  Smith-predictor/model-based, gain scheduling, or state-space/LQR/MPC (and add
+  feed-forward).
+\end{enumerate}
+\end{answerkey}
+
+\begin{partnote}
+\emph{End of Chapter 10.} Next: \textbf{Hardware Debugging \& Lab Skills} ---
+the oscilloscope, logic analyser, JTAG/SWD, ST-Link vs J-Link, and the
+board-bring-up sequence --- the instrument-led methods this book keeps invoking,
+made explicit.
+\end{partnote}

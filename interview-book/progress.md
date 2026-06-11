@@ -31,7 +31,7 @@ matter) on top of chapter content.
 | 7  | ch07_can_bus.tex | CAN Bus Deep Dive | 45 | ~13 | [x] full topic scope |
 | 8  | ch08_avionics_buses.tex | Avionics Data Buses | 40 | ~11 | [x] full topic scope |
 | 9  | ch09_rtos_realtime.tex | RTOS & Real-Time | 40 | ~14 | [x] full topic scope |
-| 10 | ch10_control_pid.tex | Control Systems & PID | 30 | — | [ ] |
+| 10 | ch10_control_pid.tex | Control Systems & PID | 30 | ~10 | [x] full topic scope |
 | 11 | ch11_debugging_lab.tex | Hardware Debugging & Lab Skills | 30 | — | [ ] |
 | 12 | ch12_vnv_do178.tex | V&V, DO-178B & Test Methodology | 30 | — | [ ] |
 | 13 | ch13_coding_gym.tex | 60 Embedded C Problems | 60 | — | [ ] |
@@ -40,8 +40,8 @@ matter) on top of chapter content.
 | 16 | ch16_behavioral_company.tex | Behavioral & Company Rounds | 20 | — | [ ] **BLOCKED — see note** |
 | 17 | ch17_mock_interviews.tex | 5 Full Mock Interviews | 20 | — | [ ] |
 
-**Current compiled size:** `build/book.pdf` = **132 pages** (title + TOC +
-Chapters 1–9), of the ~520 target.
+**Current compiled size:** `build/book.pdf` = **141 pages** (title + TOC +
+Chapters 1–10), of the ~520 target.
 
 ## Session log
 
@@ -202,6 +202,17 @@ to approach budget without filler.
   Liu-Layland, mutex, priority inheritance, deadlock cycle detect, queue,
   round-robin, context save, DPRAM mailbox, counting semaphore, utilization).
 - Compiled clean: 132 pp, zero LaTeX warnings.
+
+### Session 11 — Chapter 10 (Control Systems & PID)
+- Full PLAN.md scope: open vs closed loop, P/I/D intuition, Ziegler-Nichols
+  tuning, overshoot/rise/settling/steady-state error, sensor noise filtering,
+  discrete PID in C, servo position loop.
+- Template complete: Primer (4 sections), 3-tier Q&A (10 + 8 + 4 = 22
+  questions), Coding Gym (6 problems), resume-link box, scorecard + answer key.
+- 6 host snippets verified clean under `gcc -Wall -Wextra -std=c11 -lm`
+  (discrete PID, anti-windup clamp, derivative-on-measurement, EMA filter,
+  Ziegler-Nichols gains, step-response metrics 20%/0.5s).
+- Compiled clean: 141 pp, zero LaTeX warnings.
 
 ## Open flags / [VERIFY] / [NEEDS INTAKE] items
 - **Chapters 15 & 16 are HARD-BLOCKED.** Per PLAN.md Section 5 and CLAUDE.md,
