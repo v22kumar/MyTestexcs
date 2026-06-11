@@ -23,7 +23,7 @@ matter) on top of chapter content.
 | Ch | File | Title | Budget (pp) | Actual pp | Status |
 |----|------|-------|-------------|-----------|--------|
 | 1  | ch01_embedded_c.tex | Embedded C Mastery | 70 | ~24 (Parts 1 & 2) | [x] both parts done; under budget — see note |
-| 2  | ch02_memory_toolchain.tex | Memory & Toolchain | 30 | — | [ ] |
+| 2  | ch02_memory_toolchain.tex | Memory & Toolchain | 30 | ~14 | [x] full topic scope; see budget note |
 | 3  | ch03_arm_architecture.tex | ARM & MCU Architecture | 50 | — | [ ] |
 | 4  | ch04_interrupts_timers_dma.tex | Interrupts, Timers & DMA | 40 | — | [ ] |
 | 5  | ch05_uart_rs_serial.tex | UART / RS232 / RS422 / RS485 | 35 | — | [ ] |
@@ -40,8 +40,8 @@ matter) on top of chapter content.
 | 16 | ch16_behavioral_company.tex | Behavioral & Company Rounds | 20 | — | [ ] **BLOCKED — see note** |
 | 17 | ch17_mock_interviews.tex | 5 Full Mock Interviews | 20 | — | [ ] |
 
-**Current compiled size:** `build/book.pdf` = **26 pages** (title + TOC +
-Chapter 1 complete), of the ~520 target.
+**Current compiled size:** `build/book.pdf` = **40 pages** (title + TOC +
+Chapters 1–2), of the ~520 target.
 
 ## Session log
 
@@ -76,6 +76,27 @@ Chapter 1 complete), of the ~520 target.
   builders, more bit tricks), and deepen the primers. Tracking deliberately,
   not silently, under budget. Chapter 1 marked content-complete [x] for its
   topic scope; the budget expansion is a separate later task.
+
+### Session 3 — Chapter 2 (Memory & Toolchain)
+- Wrote Ch 2 in full per PLAN.md scope: memory map, stack vs heap,
+  `.text/.rodata/.data/.bss`, the four-stage build pipeline, linker scripts
+  (VMA/LMA), startup code, `size`/`.map` footprint, and stack-overflow /
+  memory-corruption diagnosis.
+- Template complete: Primer (3 concept sections), 3-tier Q&A (5 + 6 + 4 = 15
+  questions), Coding Gym (12 problems), resume-link box, 10-question scorecard
+  + answer key.
+- **All 12 C snippets verified** clean under `gcc -Wall -Wextra -std=c11`
+  (outputs confirmed: pool/free-list reuse, arena alignment, startup
+  `.data` copy `1234` / `.bss` zero `0000`, stack high-water `10`, footprint
+  `one=130 all=520`, etc.). The address-printing snippet runs but its
+  addresses are platform-dependent (noted in-text); no target-only fragments
+  needed.
+- **Compiled clean:** 40 pp total, zero LaTeX warnings.
+- **Budget note:** Ch 2 is ~14 pp vs a 30 pp budget — the 15 Q&A / 12 code / 3
+  concept mix is all present, but answers are spoken-length so the page count
+  runs lighter than budget. Same deliberate under-budget posture as Ch 1; a
+  later density pass can expand Q&A depth and add problems. Tracking, not
+  hiding, the gap.
 
 ## Open flags / [VERIFY] / [NEEDS INTAKE] items
 - **Chapters 15 & 16 are HARD-BLOCKED.** Per PLAN.md Section 5 and CLAUDE.md,
