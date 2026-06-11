@@ -29,7 +29,7 @@ matter) on top of chapter content.
 | 5  | ch05_uart_rs_serial.tex | UART / RS232 / RS422 / RS485 | 35 | ~12 | [x] full topic scope |
 | 6  | ch06_spi_i2c.tex | SPI & I2C | 30 | ~10 | [x] full topic scope |
 | 7  | ch07_can_bus.tex | CAN Bus Deep Dive | 45 | ~13 | [x] full topic scope |
-| 8  | ch08_avionics_buses.tex | Avionics Data Buses | 40 | — | [ ] |
+| 8  | ch08_avionics_buses.tex | Avionics Data Buses | 40 | ~11 | [x] full topic scope |
 | 9  | ch09_rtos_realtime.tex | RTOS & Real-Time | 40 | — | [ ] |
 | 10 | ch10_control_pid.tex | Control Systems & PID | 30 | — | [ ] |
 | 11 | ch11_debugging_lab.tex | Hardware Debugging & Lab Skills | 30 | — | [ ] |
@@ -40,8 +40,8 @@ matter) on top of chapter content.
 | 16 | ch16_behavioral_company.tex | Behavioral & Company Rounds | 20 | — | [ ] **BLOCKED — see note** |
 | 17 | ch17_mock_interviews.tex | 5 Full Mock Interviews | 20 | — | [ ] |
 
-**Current compiled size:** `build/book.pdf` = **107 pages** (title + TOC +
-Chapters 1–7), of the ~520 target.
+**Current compiled size:** `build/book.pdf` = **118 pages** (title + TOC +
+Chapters 1–8 = all of Part B), of the ~520 target.
 
 ## Session log
 
@@ -179,6 +179,18 @@ to approach budget without filler.
   round-trip, CRC-15, bitrate 500k @ 87% sample, fault states, COB-ID, filter,
   J1939 PGN, bus-load math).
 - Compiled clean: 107 pp, zero LaTeX warnings.
+
+### Session 9 — Chapter 8 (Avionics Data Buses) — completes Part B
+- Full PLAN.md scope: MIL-STD-1553B (BC/RT/BM, command/status/data words),
+  ARINC 429 (label/SDI/SSM/parity), Ethernet TCP vs UDP for telemetry, CCDL
+  redundancy/voting/failover, SPIL-type serial links, telemetry framing.
+- Template complete: Primer (4 sections), 3-tier Q&A (10 + 11 + 5 = 26
+  questions), Coding Gym (8 problems), resume-link box, scorecard + answer key.
+- 8 host snippets verified clean under `gcc -Wall -Wextra -std=c11` (ARINC 429
+  pack/extract/parity/label-reverse, 1553 command/status decode, telemetry
+  find+validate, CCDL median-of-three vote, failover select).
+- Compiled clean: 118 pp, zero LaTeX warnings.
+- **Part B (Chapters 5-8) complete.**
 
 ## Open flags / [VERIFY] / [NEEDS INTAKE] items
 - **Chapters 15 & 16 are HARD-BLOCKED.** Per PLAN.md Section 5 and CLAUDE.md,
