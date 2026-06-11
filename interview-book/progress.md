@@ -30,7 +30,7 @@ matter) on top of chapter content.
 | 6  | ch06_spi_i2c.tex | SPI & I2C | 30 | ~10 | [x] full topic scope |
 | 7  | ch07_can_bus.tex | CAN Bus Deep Dive | 45 | ~13 | [x] full topic scope |
 | 8  | ch08_avionics_buses.tex | Avionics Data Buses | 40 | ~11 | [x] full topic scope |
-| 9  | ch09_rtos_realtime.tex | RTOS & Real-Time | 40 | — | [ ] |
+| 9  | ch09_rtos_realtime.tex | RTOS & Real-Time | 40 | ~14 | [x] full topic scope |
 | 10 | ch10_control_pid.tex | Control Systems & PID | 30 | — | [ ] |
 | 11 | ch11_debugging_lab.tex | Hardware Debugging & Lab Skills | 30 | — | [ ] |
 | 12 | ch12_vnv_do178.tex | V&V, DO-178B & Test Methodology | 30 | — | [ ] |
@@ -40,8 +40,8 @@ matter) on top of chapter content.
 | 16 | ch16_behavioral_company.tex | Behavioral & Company Rounds | 20 | — | [ ] **BLOCKED — see note** |
 | 17 | ch17_mock_interviews.tex | 5 Full Mock Interviews | 20 | — | [ ] |
 
-**Current compiled size:** `build/book.pdf` = **118 pages** (title + TOC +
-Chapters 1–8 = all of Part B), of the ~520 target.
+**Current compiled size:** `build/book.pdf` = **132 pages** (title + TOC +
+Chapters 1–9), of the ~520 target.
 
 ## Session log
 
@@ -191,6 +191,17 @@ to approach budget without filler.
   find+validate, CCDL median-of-three vote, failover select).
 - Compiled clean: 118 pp, zero LaTeX warnings.
 - **Part B (Chapters 5-8) complete.**
+
+### Session 10 — Chapter 9 (RTOS & Real-Time) — opens Part C
+- Full PLAN.md scope: task states & scheduling (preemptive/round-robin/RMS/EDF),
+  context switch, mutex vs semaphore vs queue, priority inversion & inheritance,
+  deadlock, hard vs soft real-time, bare-metal vs RTOS, DPRAM handshake.
+- Template complete: Primer (4 sections), 3-tier Q&A (10 + 9 + 5 = 24
+  questions), Coding Gym (12 problems), resume-link box, scorecard + answer key.
+- 12 host snippets verified clean under `gcc -Wall -Wextra -std=c11` (RMS/EDF,
+  Liu-Layland, mutex, priority inheritance, deadlock cycle detect, queue,
+  round-robin, context save, DPRAM mailbox, counting semaphore, utilization).
+- Compiled clean: 132 pp, zero LaTeX warnings.
 
 ## Open flags / [VERIFY] / [NEEDS INTAKE] items
 - **Chapters 15 & 16 are HARD-BLOCKED.** Per PLAN.md Section 5 and CLAUDE.md,

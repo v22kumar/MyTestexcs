@@ -1,0 +1,1047 @@
+% chapters/ch09_rtos_realtime.tex — Chapter 9: RTOS & Real-Time
+% Scope (PLAN.md): task states & scheduling (preemptive/round-robin/
+% rate-monotonic), context switch, mutex vs semaphore vs queue, priority
+% inversion & inheritance, deadlock, hard vs soft real-time, determinism,
+% bare-metal superloop vs RTOS, shared-memory/DPRAM handshake (her BEL work).
+% Budget 40 pp, mix 24 Q&A / 12 code / 4 concept.
+% All snippets verified gcc -Wall -Wextra -std=c11 (zero warnings).
+
+\chapter{RTOS \& Real-Time}
+\label{ch:rtos-realtime}
+
+\begin{partnote}
+\textbf{Part C opens here.} \textbf{Scope} --- task states \& scheduling
+(preemptive / round-robin / rate-monotonic / EDF) $\rightarrow$ the context
+switch $\rightarrow$ mutex vs semaphore vs queue $\rightarrow$ priority
+inversion \& inheritance $\rightarrow$ deadlock $\rightarrow$ hard vs soft
+real-time \& determinism $\rightarrow$ bare-metal superloop vs RTOS
+$\rightarrow$ shared-memory / DPRAM handshake patterns. The DPRAM handshake is
+straight off the resume (the BEL real-time DPRAM polling architecture with
+sub-1\,ms latency), and priority inversion is \emph{the} classic RTOS
+interview question.
+\end{partnote}
+
+``Real-time'' does not mean fast --- it means \emph{predictable}: the right
+answer by the deadline, every time, even in the worst case. An RTOS exists to
+make multi-task timing analysable; the questions here probe whether you
+understand the mechanisms (scheduling, synchronisation) \emph{and} their failure
+modes (inversion, deadlock, jitter).
+
+%=====================================================================
+\section{Primer}
+%=====================================================================
+
+\subsection{Tasks, states, and the context switch}
+
+An RTOS runs multiple \textbf{tasks}, each with its own stack and a
+\textbf{control block (TCB)} holding its saved registers, stack pointer,
+priority, and state. A task is \textbf{running}, \textbf{ready} (runnable, but a
+higher-priority task has the CPU), or \textbf{blocked} (waiting on a
+semaphore/queue/delay). The scheduler switches the CPU between them with a
+\textbf{context switch}: save the running task's registers to its TCB/stack,
+load the next task's, and resume --- on Cortex-M this is done in the PendSV
+handler, leveraging the hardware exception stacking from Chapter 3. The switch
+costs cycles, so its frequency and cost factor into the timing budget.
+
+\subsection{Scheduling policies}
+
+\textbf{Preemptive priority} is the norm in an RTOS: the highest-priority ready
+task always runs, preempting lower ones immediately --- this is what makes
+response time analysable. \textbf{Round-robin} time-slices equal-priority tasks
+for fairness. \textbf{Rate-monotonic scheduling (RMS)} is the classic
+fixed-priority rule for periodic tasks: \emph{shorter period $\rightarrow$
+higher priority}, which is provably optimal among fixed-priority schemes, with
+the Liu--Layland utilisation bound $U \le n(2^{1/n}-1)$ (~69\% as $n\to\infty$)
+guaranteeing schedulability. \textbf{Earliest-deadline-first (EDF)} is a dynamic
+policy that always runs the task with the nearest deadline and can reach 100\%
+utilisation, at the cost of dynamic priorities and harder analysis. Most
+embedded RTOSes use fixed-priority preemption with rate-monotonic assignment.
+
+\subsection{Synchronisation: mutex, semaphore, queue}
+
+Three primitives, three jobs. A \textbf{mutex} provides \emph{mutual exclusion}
+--- it has an owner, only the owner unlocks it, and it protects a shared
+resource (a peripheral, a data structure). A \textbf{semaphore} is a counter for
+\emph{signalling/resource-counting} --- a binary semaphore signals an event
+(ISR$\rightarrow$task), a counting semaphore guards $N$ identical resources;
+it has no owner. A \textbf{queue} passes \emph{data} between tasks (or
+ISR$\rightarrow$task) safely, combining buffering and synchronisation --- the
+preferred way to move data because it avoids shared mutable state entirely. The
+rule of thumb: protect a resource $\rightarrow$ mutex; signal an event
+$\rightarrow$ semaphore; move data $\rightarrow$ queue.
+
+\subsection{Priority inversion, deadlock, and DPRAM}
+
+\textbf{Priority inversion}: a high-priority task blocks on a mutex held by a
+low-priority task, and a \emph{medium} task (needing no mutex) preempts the low
+task --- so the medium task effectively delays the high task indefinitely. The
+fix is \textbf{priority inheritance}: temporarily raise the mutex holder to the
+waiter's priority so it runs, releases, and unblocks the high task (this is the
+Mars Pathfinder bug). \textbf{Deadlock} needs four simultaneous conditions
+(mutual exclusion, hold-and-wait, no preemption, circular wait); break any one
+--- commonly by always acquiring multiple locks in a \emph{fixed global order}
+--- and deadlock is impossible. \textbf{DPRAM} (dual-port RAM) lets two
+processors share memory; a \textbf{flag/mailbox handshake} (writer fills data,
+sets a ready flag; reader consumes, clears it) passes data deterministically
+across the boundary --- the BEL real-time pattern with sub-1\,ms latency.
+
+%=====================================================================
+\section{Q\&A Bank}
+%=====================================================================
+
+\tierbanner{Tier 1 --- Screening (phone / HR-technical)}%
+{Two to four sentences.}
+
+\question{Q1.1}{What does ``real-time'' actually mean?}
+That correctness depends on \emph{timing} as well as result: the system must
+respond by a deadline, predictably, even in the worst case. It does not mean
+``fast'' --- a slow system that always meets its deadline is real-time; a fast
+one that occasionally misses isn't.
+
+\question{Q1.2}{Hard vs soft real-time?}
+In hard real-time a missed deadline is a system failure (a flight-control loop,
+an airbag) --- it must \emph{never} miss. In soft real-time an occasional miss
+degrades quality but is tolerable (video, UI). The distinction drives how
+conservatively you must analyse worst-case timing.
+
+\question{Q1.3}{What are the three basic task states?}
+Running (currently on the CPU), Ready (runnable but waiting for the CPU because
+a higher-priority task is running), and Blocked (waiting on an event --- a
+semaphore, queue, or delay). Tasks move between these as the scheduler and
+events dictate.
+
+\question{Q1.4}{What is a context switch?}
+Saving the current task's CPU registers (to its stack/TCB) and restoring the
+next task's, so execution resumes where that task left off. It's how one CPU
+runs many tasks; on Cortex-M it's done in the PendSV exception.
+
+\question{Q1.5}{Mutex vs semaphore in one line?}
+A mutex enforces mutual exclusion and has an owner (only the locker unlocks it),
+protecting a shared resource; a semaphore is an ownerless counter for signalling
+events or counting resources.
+
+\question{Q1.6}{What is a queue used for in an RTOS?}
+To pass data between tasks (or from an ISR to a task) safely, with built-in
+buffering and synchronisation --- the producer enqueues, the consumer blocks
+until data is available. It avoids shared mutable state and its races.
+
+\question{Q1.7}{What is preemptive scheduling?}
+The scheduler always runs the highest-priority ready task, immediately
+interrupting (preempting) a lower-priority one when a higher task becomes ready.
+This makes worst-case response time analysable, which is why RTOSes use it.
+
+\question{Q1.8}{Bare-metal superloop vs RTOS --- when each?}
+A superloop (\code{while(1)} polling + interrupts) is simplest and fine for
+small, few-task systems with loose timing. An RTOS earns its overhead when you
+have multiple independent activities with different rates/priorities and need
+analysable preemptive timing --- it trades RAM/complexity for structure and
+determinism.
+
+\question{Q1.9}{What is priority inversion (one line)?}
+When a high-priority task is blocked waiting on a resource held by a
+low-priority task, and a medium task preempts the low task --- so the
+high-priority task is effectively delayed by an unrelated medium task.
+
+\question{Q1.10}{What is rate-monotonic scheduling?}
+A fixed-priority policy for periodic tasks where the shorter the period, the
+higher the priority. It's optimal among fixed-priority schemes and comes with a
+utilisation bound that guarantees all deadlines are met if utilisation stays
+under it.
+
+\tierbanner{Tier 2 --- Core technical (panel round)}%
+{A short paragraph.}
+
+\question{Q2.1}{Explain priority inversion fully and how priority inheritance
+fixes it.}
+A high task H blocks on a mutex held by a low task L. A medium task M (needing
+nothing from the mutex) becomes ready and, being higher priority than L,
+preempts L --- so L can't run to release the mutex, and H stays blocked behind
+M indefinitely. \textbf{Priority inheritance} fixes it: while H waits on L's
+mutex, the RTOS temporarily raises L's priority to H's, so L runs (M can no
+longer preempt it), releases the mutex, and H proceeds; L then drops back. This
+is the famous Mars Pathfinder bug --- a watchdog kept resetting because a
+high-priority bus task was inverted behind a low one. The alternative,
+\emph{priority ceiling}, raises the locker to a precomputed ceiling on acquire.
+
+\question{Q2.2}{What are the four conditions for deadlock, and how do you
+prevent it?}
+Mutual exclusion (resources held exclusively), hold-and-wait (a task holds one
+resource while waiting for another), no preemption (resources aren't forcibly
+taken), and circular wait (a cycle of tasks each waiting on the next's
+resource). All four must hold simultaneously, so breaking \emph{any one}
+prevents deadlock --- the most practical is to eliminate circular wait by
+acquiring multiple locks in a \textbf{fixed global order} everywhere. Others:
+take all locks at once (no hold-and-wait), or use timeouts (so a stuck acquire
+fails rather than waits forever).
+
+\question{Q2.3}{When do you use a mutex vs a binary semaphore vs a queue?}
+Mutex: protect a shared \emph{resource} that must be accessed by one task at a
+time (it has ownership and supports priority inheritance, so it's the right
+tool for mutual exclusion). Binary semaphore: \emph{signal} an event between
+contexts (an ISR gives, a task takes) --- no ownership, used purely for
+synchronisation. Queue: \emph{transfer data} with buffering, so producer and
+consumer never touch shared memory directly. A common bug is using a semaphore
+where a mutex is needed --- you lose priority inheritance and reintroduce
+inversion.
+
+\question{Q2.4}{Why must you use the ``FromISR'' API variants in an ISR?}
+Because the normal RTOS calls may block (and an ISR must never block) and they
+manipulate scheduler state assuming task context. The \code{...FromISR}
+variants are non-blocking and signal the scheduler that a context switch may be
+needed \emph{after} the ISR returns (via a ``higher-priority task woken'' flag
+$\rightarrow$ a yield). Calling a blocking task API from an ISR corrupts the
+scheduler or hangs --- a serious, common bug.
+
+\question{Q2.5}{Apply the rate-monotonic utilisation test to three tasks.}
+For tasks with (compute, period) (1,4), (2,8), (2,16), utilisation
+$U = 1/4 + 2/8 + 2/16 = 0.625$ (62.5\%). The Liu--Layland bound for $n=3$ is
+$3(2^{1/3}-1) \approx 0.78$. Since $0.625 \le 0.78$, the set is schedulable
+under rate-monotonic priorities (shortest period highest). Note the bound is
+\emph{sufficient but not necessary} --- sets above it may still be schedulable
+(check with exact response-time analysis), but under it you're guaranteed safe.
+
+\question{Q2.6}{What is the difference between a counting and a binary
+semaphore, with a use for each?}
+A binary semaphore holds 0 or 1 --- used to signal a single event (data ready,
+interrupt occurred). A counting semaphore holds 0..N --- used to manage $N$
+interchangeable resources (e.g.\ a pool of DMA buffers): each \code{take}
+decrements, each \code{give} increments, and a task blocks when the count is 0.
+The count \emph{is} the number of available resources, so it naturally limits
+concurrency to $N$.
+
+\question{Q2.7}{How does a queue both synchronise and transfer data?}
+A task that reads an empty queue \emph{blocks} until a producer writes (the
+synchronisation), and the write \emph{copies} the data into the queue's buffer
+(the transfer), so the consumer gets a private copy with no shared-memory race.
+A bounded queue also applies back-pressure: a producer writing to a full queue
+blocks (or fails), preventing overrun. This is why RTOS designs prefer
+``communicate by passing messages'' over ``share memory and lock.''
+
+\question{Q2.8}{Describe a DPRAM flag handshake between two processors.}
+The producer writes its data into the shared dual-port RAM, then sets a
+\textbf{ready flag}; the consumer polls (or is interrupted on) that flag, reads
+the data, and \textbf{clears} the flag to signal ``consumed.'' The flag is the
+single synchronisation point, and the ordering (data \emph{then} flag on write;
+flag \emph{then} data on read) plus a memory barrier guarantees the consumer
+never reads half-written data. With a fixed polling period this gives bounded,
+deterministic latency --- the BEL sub-1\,ms DPRAM architecture on the resume.
+
+\question{Q2.9}{What makes an RTOS deterministic, and what can break it?}
+Determinism comes from preemptive fixed-priority scheduling (the highest task
+always runs within a bounded time), $O(1)$ or bounded-time scheduler operations,
+and bounded interrupt latency. It's broken by: unbounded priority inversion
+(fixed by inheritance), long critical sections / interrupt disables (raise worst
+-case latency), dynamic memory allocation in the hot path (variable time ---
+Chapter 1), and unbounded loops or blocking in high-priority tasks. Analysing
+worst-case timing means accounting for all of these.
+
+\tierbanner{Tier 3 --- Trap \& depth (principal-engineer level)}%
+{A paragraph plus the trap.}
+
+\question{Q3.1}{Your high-priority control task occasionally misses its deadline
+even though average CPU load is low. Where do you look?}
+Low \emph{average} load is irrelevant to a real-time miss --- you hunt the
+\emph{worst case}. Suspects: (1) \textbf{priority inversion} --- the control
+task blocks on a mutex (maybe hidden inside a driver or \code{printf}) held by a
+low task that a medium task preempts; (2) a \textbf{long critical section or
+interrupt-disable} elsewhere that delays the control task's preemption; (3) a
+lower-priority ISR running long (the control task is a \emph{task}, and any ISR
+outranks all tasks); (4) \textbf{blocking calls} or unbounded loops in the
+path. Method: enable the RTOS's runtime stats / trace, measure worst-case
+latency with a GPIO toggle on a scope, and check for mutexes without
+inheritance. \trap the trap is reasoning from average utilisation; real-time is
+about the worst-case confluence (the control task ready exactly when the longest
+critical section and an inversion coincide). That worst-case mindset is the core
+of the BEL HSI timing-defect work.
+
+\question{Q3.2}{Is a binary semaphore a valid substitute for a mutex? When does
+that choice cause a bug?}
+Functionally a binary semaphore can guard a critical section, but it is
+\emph{not} a mutex: it has no owner (any task can ``give'' it, even one that
+didn't take it) and --- crucially --- it provides no \textbf{priority
+inheritance}. So if you protect a resource with a binary semaphore and a
+high-priority task waits on it, a medium task can inversion-block the low holder
+indefinitely; a real mutex would have boosted the holder. \trap the trap is
+``they both do mutual exclusion, so they're interchangeable.'' For resource
+protection use a mutex (ownership + inheritance); reserve semaphores for
+signalling. Using the wrong one reintroduces exactly the unbounded inversion
+that sank Mars Pathfinder.
+
+\question{Q3.3}{Two tasks each lock mutex A then B in one path and B then A in
+another. What happens, and give two fixes?}
+Classic \textbf{deadlock} via circular wait: task 1 holds A and waits for B
+while task 2 holds B and waits for A --- neither can proceed. It's intermittent
+because it needs the precise interleaving where each grabs its first lock before
+the other grabs the second. Fix 1 (best): impose a \textbf{global lock
+ordering} --- every task acquires A before B, never B before A, which makes a
+cycle impossible. Fix 2: use a timeout on the second acquire and back off /
+retry (release the first lock, wait, try again). \trap the trap is ``it works in
+testing'' --- deadlocks are timing-dependent and may appear only in the field
+under load. The disciplined design \emph{proves} deadlock-freedom by lock
+ordering rather than hoping the interleaving never occurs.
+
+\question{Q3.4}{Design the DPRAM handshake so a fast writer never corrupts what
+a slower reader is consuming, and quantify the latency.}
+Single-slot flag handshake: writer checks the flag is \emph{clear} before
+writing (so it never overwrites unconsumed data), writes the payload, issues a
+memory barrier, then sets the flag; reader sees the flag set, reads the payload,
+barrier, then clears the flag. This is single-producer/single-consumer and
+lock-free --- the writer owns the ``clear$\rightarrow$set'' transition, the
+reader owns ``set$\rightarrow$clear.'' If the writer is faster than the reader,
+it simply \emph{waits} (flag still set) and drops or buffers --- you choose the
+overrun policy. Latency is bounded by the reader's poll period (or interrupt
+latency): with a 1\,kHz poll, worst-case delivery is $<$1\,ms --- the resume's
+figure. \trap the trap is omitting the barrier and the ``flag clear before
+write'' check, which lets the reader see a torn, half-updated payload --- the
+same visibility/ordering/atomicity triad from Chapters 1 and 4, now across a
+processor boundary. For higher throughput you extend it to a double-buffer or a
+ring in the shared RAM.
+
+\question{Q3.5}{RMS vs EDF --- why do most safety-critical embedded systems use
+fixed-priority RMS despite EDF reaching 100\% utilisation?}
+EDF is dynamic (priorities change as deadlines approach) and can theoretically
+schedule any set up to 100\% utilisation, but that very dynamism makes it
+\emph{harder to analyse, certify, and debug}: a transient overload under EDF can
+cause a \emph{domino} of missed deadlines (the whole set destabilises), and you
+can't easily reason about ``which task runs when.'' Fixed-priority RMS is
+predictable (priorities are static, the highest-priority task is always
+identifiable), degrades gracefully under overload (only the lowest-priority
+tasks miss), and has mature response-time analysis and tool/certification
+support. \trap the trap is treating ``higher utilisation bound'' as ``better.''
+For DO-178-style certification, \emph{analysability and predictable degradation}
+beat theoretical efficiency --- which is why flight software overwhelmingly uses
+fixed-priority preemptive scheduling, and why the resume's real-time work lives
+in that world.
+
+%=====================================================================
+\section{Coding Gym}
+%=====================================================================
+
+\begin{partnote}
+Twelve host-compilable problems (verified under
+\code{gcc -Wall -Wextra -std=c11}) modelling the scheduler and synchronisation
+mechanics: RMS/EDF selection, schedulability, mutex/semaphore/queue, priority
+inheritance, deadlock detection, and the DPRAM mailbox handshake from the BEL
+work.
+\end{partnote}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Rate-monotonic priority comparison}
+
+\textbf{Problem.} Decide which of two periodic tasks gets higher priority under
+rate-monotonic scheduling.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Shorter period $\rightarrow$ higher priority.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static int rms_higher(uint32_t period_a, uint32_t period_b) {
+    return period_a < period_b;     /* shorter period wins */
+}
+
+int main(void) {
+    printf("a(4ms) higher than b(8ms)? %d\n", rms_higher(4, 8));   /* 1 */
+    return 0;
+}
+\end{cgym}
+
+Rate-monotonic assigns priority purely by period: the 4\,ms task outranks the
+8\,ms task, regardless of how much CPU each uses. This is provably the optimal
+\emph{fixed}-priority assignment for periodic tasks, and it's why you set RTOS
+task priorities by rate, not by ``importance'' --- a frequent beginner mistake
+that breaks the schedulability guarantee.
+
+\followups
+\begin{enumerate}
+\item \emph{``Two tasks with equal periods?''} $\rightarrow$ Tie-break
+  arbitrarily (or by deadline); they can round-robin.
+\item \emph{``A critical but slow task --- give it top priority?''}
+  $\rightarrow$ No --- that can break RMS analysis; use period, and bound its
+  execution.
+\item \emph{``Deadline $\ne$ period?''} $\rightarrow$ Use deadline-monotonic
+  (shorter deadline wins) --- the generalisation.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Rate-monotonic schedulability (Liu--Layland)}
+
+\textbf{Problem.} Test whether a set of periodic tasks is RMS-schedulable by the
+utilisation bound.
+
+\textbf{Hints.}
+\begin{itemize}
+\item $U=\sum c_i/t_i$; bound $= n(2^{1/n}-1)$.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+#include <math.h>
+
+static int rms_schedulable(const uint32_t *c, const uint32_t *t, int n) {
+    double U = 0;
+    for (int i = 0; i < n; i++) U += (double)c[i] / (double)t[i];
+    double bound = n * (pow(2.0, 1.0 / n) - 1.0);
+    return U <= bound + 1e-9;
+}
+
+int main(void) {
+    uint32_t C[3] = {1, 2, 2}, T[3] = {4, 8, 16};
+    printf("schedulable=%d\n", rms_schedulable(C, T, 3));   /* 1 (U=0.625 <= 0.78) */
+    return 0;
+}
+\end{cgym}
+
+$U = 0.25 + 0.25 + 0.125 = 0.625$ against the $n=3$ bound $\approx 0.78$, so the
+set is guaranteed schedulable. The bound is \emph{sufficient but not necessary}:
+sets above it may still meet all deadlines (verify with exact response-time
+analysis), but under it you need no further proof. This one calculation tells you
+at design time whether a proposed task set even fits.
+
+\followups
+\begin{enumerate}
+\item \emph{``Above the bound --- now what?''} $\rightarrow$ Exact
+  response-time analysis; the bound is conservative.
+\item \emph{``Bound as $n\to\infty$?''} $\rightarrow$ $\ln 2 \approx 0.69$ ---
+  the famous 69\% rule.
+\item \emph{``Where does context-switch cost go?''} $\rightarrow$ Add it into
+  each task's $c_i$ for a realistic bound.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Mutex with ownership}
+
+\textbf{Problem.} Model a mutex where only the locking task may unlock.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Track \code{locked} and \code{owner}; reject unlock by a non-owner.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+typedef struct { int locked, owner; } mutex_t;
+
+static int mutex_lock(mutex_t *m, int task) {
+    if (m->locked) return 0;            /* already held -> caller must block/retry */
+    m->locked = 1; m->owner = task;
+    return 1;
+}
+static int mutex_unlock(mutex_t *m, int task) {
+    if (m->locked && m->owner == task) { m->locked = 0; m->owner = -1; return 1; }
+    return 0;                           /* only the owner may unlock */
+}
+
+int main(void) {
+    mutex_t m = {0, -1};
+    printf("lock1=%d lock2=%d unlock2=%d unlock1=%d\n",
+           mutex_lock(&m, 1), mutex_lock(&m, 2),
+           mutex_unlock(&m, 2), mutex_unlock(&m, 1));   /* 1 0 0 1 */
+    return 0;
+}
+\end{cgym}
+
+The defining mutex property is \textbf{ownership}: task 2 cannot unlock what
+task 1 locked. That ownership is what lets a real RTOS implement priority
+inheritance (it knows \emph{who} holds the lock to boost). A semaphore has no
+owner, which is exactly why it can't provide inheritance (Q3.2). In a real RTOS
+a failed lock \emph{blocks} the task rather than returning 0.
+
+\followups
+\begin{enumerate}
+\item \emph{``Recursive mutex?''} $\rightarrow$ Track a count so the owner can
+  re-lock and must unlock the same number of times.
+\item \emph{``Why does ownership enable inheritance?''} $\rightarrow$ The RTOS
+  must know which task to boost --- the holder.
+\item \emph{``What should \code{lock} do on contention in a real RTOS?''}
+  $\rightarrow$ Block the caller and add it to the mutex's wait list.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Priority inheritance boost}
+
+\textbf{Problem.} Compute the holder's effective priority when a higher-priority
+task waits on its mutex (lower number = higher priority).
+
+\textbf{Hints.}
+\begin{itemize}
+\item Boost the holder to the highest-priority (lowest-number) waiter.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+/* lower number = higher priority; boost holder to the waiter if waiter is higher */
+static int inherit_priority(int holder_prio, int waiter_prio) {
+    return waiter_prio < holder_prio ? waiter_prio : holder_prio;
+}
+
+int main(void) {
+    printf("boosted=%d\n", inherit_priority(5, 2));   /* low holder(5) boosted to 2 */
+    return 0;
+}
+\end{cgym}
+
+When high-priority task (prio 2) blocks on a mutex held by low-priority task
+(prio 5), the holder is temporarily boosted to prio 2 so a medium task (prio 3)
+can no longer preempt it --- the holder runs, releases the mutex, and the high
+task proceeds; the holder then reverts to 5. This is the entire mechanism that
+prevents unbounded priority inversion (Q2.1, Q3.2), and the fix NASA applied to
+Mars Pathfinder.
+
+\followups
+\begin{enumerate}
+\item \emph{``Multiple waiters?''} $\rightarrow$ Boost to the highest-priority
+  (lowest-number) waiter among them.
+\item \emph{``Nested mutexes?''} $\rightarrow$ Inheritance can chain; this is
+  where priority-ceiling is simpler to bound.
+\item \emph{``When does the boost end?''} $\rightarrow$ On unlock the holder
+  drops back to its base (or next-highest inherited) priority.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Deadlock detection by cycle finding}
+
+\textbf{Problem.} Given a wait-for graph (each task waits for at most one other),
+detect a circular wait (deadlock).
+
+\textbf{Hints.}
+\begin{itemize}
+\item One out-edge per node $\rightarrow$ a functional graph; use Floyd's
+  tortoise/hare to find a cycle.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+/* wait_for[i] = task i waits for the resource held by task wait_for[i], or -1 */
+static int reaches_cycle(const int *wf, int start) {
+    int slow = start, fast = start;
+    for (;;) {
+        if (fast == -1) return 0;
+        fast = wf[fast];
+        if (fast == -1) return 0;
+        fast = wf[fast];
+        slow = wf[slow];
+        if (slow == fast) return 1;     /* tortoise met hare -> cycle */
+    }
+}
+static int has_cycle(const int *wf, int n) {
+    for (int i = 0; i < n; i++) if (reaches_cycle(wf, i)) return 1;
+    return 0;
+}
+
+int main(void) {
+    int cyc[3] = {1, 2, 0};     /* 0->1->2->0 : deadlock */
+    int ok[3]  = {1, 2, -1};    /* 0->1->2->done : no cycle */
+    printf("cycle=%d nocycle=%d\n", has_cycle(cyc, 3), has_cycle(ok, 3));   /* 1 0 */
+    return 0;
+}
+\end{cgym}
+
+A circular wait --- task 0 waits on 1, 1 on 2, 2 back on 0 --- is the fourth
+deadlock condition and the one you detect or design out. Floyd's algorithm finds
+the cycle in $O(n)$ time and $O(1)$ space. In practice you \emph{prevent} rather
+than detect: a global lock-acquisition order makes a cycle structurally
+impossible (Q3.3), but a deadlock detector like this is useful in test/diagnostic
+builds.
+
+\followups
+\begin{enumerate}
+\item \emph{``How do you prevent rather than detect?''} $\rightarrow$ Fixed
+  global lock ordering, or take-all-or-none, or timeouts.
+\item \emph{``Multiple resources per task?''} $\rightarrow$ General
+  wait-for-graph cycle detection (DFS with colours).
+\item \emph{``Why is detection-after-the-fact risky in flight code?''}
+  $\rightarrow$ By then you're already deadlocked; prevention is mandatory.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Bounded message queue}
+
+\textbf{Problem.} Implement a fixed-size FIFO queue for inter-task messages.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Circular buffer with head, tail, and count; reject on full/empty.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+#define QN 4
+typedef struct { int buf[QN]; int head, tail, count; } queue_t;
+
+static int q_put(queue_t *q, int v) {
+    if (q->count == QN) return 0;       /* full */
+    q->buf[q->tail] = v;
+    q->tail = (q->tail + 1) % QN;
+    q->count++;
+    return 1;
+}
+static int q_get(queue_t *q, int *v) {
+    if (q->count == 0) return 0;        /* empty */
+    *v = q->buf[q->head];
+    q->head = (q->head + 1) % QN;
+    q->count--;
+    return 1;
+}
+
+int main(void) {
+    queue_t q = {{0}, 0, 0, 0};
+    q_put(&q, 10); q_put(&q, 20);
+    int v; q_get(&q, &v);
+    printf("first=%d count=%d\n", v, q.count);   /* 10 1 */
+    return 0;
+}
+\end{cgym}
+
+This is the data-passing primitive: the producer \code{put}s, the consumer
+\code{get}s in FIFO order, and the bounded size applies back-pressure (a full
+queue rejects/blocks, preventing overrun). In an RTOS, \code{get} on an empty
+queue \emph{blocks} the consumer until data arrives --- combining transfer and
+synchronisation, which is why ``communicate by message passing'' beats ``share
+memory and lock'' (Q2.7). It's the ring buffer of Chapter 4 with task semantics.
+
+\followups
+\begin{enumerate}
+\item \emph{``Make it block instead of returning 0.''} $\rightarrow$ The RTOS
+  queue suspends the task on empty/full with a timeout.
+\item \emph{``Pass structs, not ints.''} $\rightarrow$ Copy by size; the queue
+  owns the buffer so the sender can reuse its variable.
+\item \emph{``ISR producer?''} $\rightarrow$ Use the \code{...FromISR} variant
+  (Q2.4) and request a yield on wake.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Round-robin: next ready task}
+
+\textbf{Problem.} Pick the next runnable task after the current one, skipping
+blocked tasks.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Scan circularly from \code{cur+1}; return the first ready index.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+static int rr_next_ready(const int *ready, int n, int cur) {
+    for (int k = 1; k <= n; k++) {
+        int i = (cur + k) % n;          /* wrap around */
+        if (ready[i]) return i;
+    }
+    return -1;                          /* nothing ready -> idle */
+}
+
+int main(void) {
+    int ready[4] = {0, 0, 1, 1};
+    printf("next=%d\n", rr_next_ready(ready, 4, 0));   /* 2 */
+    return 0;
+}
+\end{cgym}
+
+Round-robin time-slices \emph{equal-priority} ready tasks for fairness: from the
+current task it advances to the next ready one, wrapping around. Returning $-1$
+(nothing ready) is when the scheduler runs the \textbf{idle task} (often a
+low-power wait). Real RTOSes combine this with priority: round-robin only among
+the tasks at the highest \emph{populated} priority level, so it's fairness
+\emph{within} a priority, not across.
+
+\followups
+\begin{enumerate}
+\item \emph{``Combine with priority.''} $\rightarrow$ Round-robin only the
+  ready tasks at the top non-empty priority.
+\item \emph{``What runs when all are blocked?''} $\rightarrow$ The idle task ---
+  often \code{WFI} to sleep until an interrupt.
+\item \emph{``Starvation risk?''} $\rightarrow$ A high-priority always-ready
+  task starves lower ones; that's intended under strict priority.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Context-switch save model}
+
+\textbf{Problem.} Model saving a task's registers, stack pointer, and PC into
+its TCB.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Copy the register set and the SP/PC into the control block.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+typedef struct { uint32_t r[4], sp, pc; } tcb_t;
+
+static void ctx_save(tcb_t *t, const uint32_t *regs, uint32_t sp, uint32_t pc) {
+    for (int i = 0; i < 4; i++) t->r[i] = regs[i];
+    t->sp = sp;
+    t->pc = pc;
+}
+
+int main(void) {
+    tcb_t t;
+    uint32_t regs[4] = {1, 2, 3, 4};
+    ctx_save(&t, regs, 0x2000, 0x8000);
+    printf("r0=%u sp=0x%X pc=0x%X\n", t.r[0], t.sp, t.pc);   /* 1 0x2000 0x8000 */
+    return 0;
+}
+\end{cgym}
+
+A real Cortex-M context switch is more nuanced: the hardware auto-stacks
+R0--R3/R12/LR/PC/xPSR on exception entry (Chapter 3), and the PendSV handler
+saves the remaining R4--R11 and swaps the stack pointer (PSP) to the next task's
+--- so ``save context'' is split between hardware and the few lines of
+assembly in PendSV. This model captures the \emph{concept}: each task's state
+lives in its TCB/stack so the CPU can be multiplexed. The switch cost (these
+saves/restores) is part of the timing budget.
+
+\followups
+\begin{enumerate}
+\item \emph{``What does the hardware save vs PendSV?''} $\rightarrow$ Hardware:
+  R0--R3,R12,LR,PC,xPSR; PendSV: R4--R11 and the PSP swap.
+\item \emph{``Why PendSV for the switch?''} $\rightarrow$ It's the lowest
+  priority, so it runs after all other ISRs --- no nested-switch races.
+\item \emph{``Per-task stacks --- sizing?''} $\rightarrow$ Worst-case call depth
+  + ISR frame; verify with the painting technique (Chapter 2).
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{DPRAM mailbox handshake}
+
+\textbf{Problem.} Implement a single-slot dual-port-RAM mailbox: a producer
+writes with a ready flag, a consumer reads and clears it.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Producer writes only when the flag is clear; consumer reads only when set.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+typedef struct { volatile int flag; volatile int data; } mailbox_t;
+
+static int mbox_write(mailbox_t *m, int v) {   /* producer side */
+    if (m->flag) return 0;          /* previous value not yet consumed */
+    m->data = v;                    /* write payload ... */
+    m->flag = 1;                    /* ... THEN publish (barrier on real HW) */
+    return 1;
+}
+static int mbox_read(mailbox_t *m, int *v) {   /* consumer side */
+    if (!m->flag) return 0;         /* nothing ready */
+    *v = m->data;                   /* read payload ... */
+    m->flag = 0;                    /* ... THEN release the slot */
+    return 1;
+}
+
+int main(void) {
+    mailbox_t mb = {0, 0};
+    mbox_write(&mb, 42);
+    int got = 0;
+    mbox_read(&mb, &got);
+    printf("got=%d flag_after=%d\n", got, mb.flag);   /* 42 0 */
+    return 0;
+}
+\end{cgym}
+
+This is the BEL real-time DPRAM pattern. The flag is the single synchronisation
+point between two processors sharing the dual-port RAM; the \emph{ordering} ---
+data before flag on write, flag before data on read --- plus a memory barrier on
+real hardware guarantees the consumer never sees a torn payload (Q3.4). With a
+fixed poll period the worst-case latency is bounded by that period: a 1\,kHz poll
+gives sub-1\,ms delivery, the figure on the resume. It's single-producer/
+single-consumer and lock-free, like the ring buffer but across a hardware
+boundary.
+
+\followups
+\begin{enumerate}
+\item \emph{``Why check the flag is clear before writing?''} $\rightarrow$ So
+  the producer never overwrites data the consumer hasn't taken.
+\item \emph{``Higher throughput?''} $\rightarrow$ Double-buffer or a ring in the
+  shared RAM (ping-pong, Chapter 4).
+\item \emph{``Where's the bug if you set the flag before writing data?''}
+  $\rightarrow$ The reader can grab a half-written payload --- the ordering
+  trap.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Counting semaphore (resource pool)}
+
+\textbf{Problem.} Manage $N$ identical resources with a counting semaphore.
+
+\textbf{Hints.}
+\begin{itemize}
+\item \code{take} decrements if available; \code{give} increments.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+typedef struct { int count; } csem_t;
+
+static int  sem_take(csem_t *s) { if (s->count > 0) { s->count--; return 1; } return 0; }
+static void sem_give(csem_t *s) { s->count++; }
+
+int main(void) {
+    csem_t s = {2};                         /* pool of 2 resources */
+    int a = sem_take(&s), b = sem_take(&s), c = sem_take(&s);
+    sem_give(&s);
+    int d = sem_take(&s);
+    printf("takes=%d,%d,%d give+take=%d\n", a, b, c, d);   /* 1 1 0 1 */
+    return 0;
+}
+\end{cgym}
+
+The count \emph{is} the number of free resources: two takes succeed, the third
+fails (pool exhausted), and after a give the next take succeeds again. This
+guards a pool of interchangeable resources --- DMA buffers, connection slots,
+hardware channels --- limiting concurrency to $N$. In an RTOS the failing
+\code{take} \emph{blocks} the task until another task \code{give}s, naturally
+serialising demand on the pool. Unlike a mutex, there's no ownership: any task
+may give.
+
+\followups
+\begin{enumerate}
+\item \emph{``Binary semaphore from this?''} $\rightarrow$ Initialise count to 1
+  (or 0 for a signal).
+\item \emph{``ISR gives, task takes --- valid?''} $\rightarrow$ Yes; that's the
+  classic event-signalling use (with the FromISR variant).
+\item \emph{``Why is no-ownership a problem for mutual exclusion?''}
+  $\rightarrow$ No priority inheritance $\rightarrow$ inversion risk (Q3.2).
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Earliest-deadline-first selection}
+
+\textbf{Problem.} Among ready tasks, pick the one with the nearest absolute
+deadline.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Scan ready tasks; track the minimum deadline.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static int edf_next(const uint32_t *deadlines, const int *ready, int n) {
+    int best = -1; uint32_t bd = 0;
+    for (int i = 0; i < n; i++) {
+        if (ready[i] && (best == -1 || deadlines[i] < bd)) {
+            best = i; bd = deadlines[i];
+        }
+    }
+    return best;
+}
+
+int main(void) {
+    uint32_t dl[3] = {30, 10, 20};
+    int ready[3]   = {1, 1, 1};
+    printf("edf=%d\n", edf_next(dl, ready, 3));   /* task 1 (deadline 10) */
+    return 0;
+}
+\end{cgym}
+
+EDF is the dynamic-priority alternative to RMS: whoever's deadline is nearest
+runs next, so priorities shift over time. It can schedule sets up to 100\%
+utilisation --- more than RMS's ~69--78\% bound --- but is harder to analyse and
+can cascade missed deadlines under overload (Q3.5), which is why safety-critical
+fixed-priority systems usually prefer RMS. Recognising EDF (and its trade-off) is
+the depth an interviewer wants.
+
+\followups
+\begin{enumerate}
+\item \emph{``EDF utilisation bound?''} $\rightarrow$ 100\% on a single core for
+  independent periodic tasks --- its headline advantage.
+\item \emph{``Why is overload dangerous under EDF?''} $\rightarrow$ A domino of
+  misses; RMS degrades more predictably (lowest priority misses first).
+\item \emph{``Ties in deadline?''} $\rightarrow$ Break arbitrarily/consistently;
+  doesn't affect schedulability.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{CPU utilisation}
+
+\textbf{Problem.} Compute total CPU utilisation (percent) for a set of periodic
+tasks.
+
+\textbf{Hints.}
+\begin{itemize}
+\item $U=\sum c_i/t_i$, expressed as a percentage.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static int cpu_util_pct(const uint32_t *c, const uint32_t *t, int n) {
+    uint64_t u = 0;
+    for (int i = 0; i < n; i++) u += (uint64_t)c[i] * 100u / t[i];
+    return (int)u;
+}
+
+int main(void) {
+    uint32_t C[3] = {1, 2, 2}, T[3] = {4, 8, 16};
+    printf("util=%d%%\n", cpu_util_pct(C, T, 3));   /* 62% */
+    return 0;
+}
+\end{cgym}
+
+Utilisation is the fraction of CPU the periodic workload consumes ---
+62\% here. It's the first feasibility number: above 100\% the set is impossible
+on one core; below the RMS bound it's guaranteed schedulable; in between it
+needs response-time analysis. You also leave headroom for ISRs, the context-
+switch overhead, and aperiodic work --- real designs target well under 100\%.
+
+\followups
+\begin{enumerate}
+\item \emph{``Above 100\% --- options?''} $\rightarrow$ Cut work, lengthen
+  periods, add a core, or move work to DMA/hardware.
+\item \emph{``Why integer overflow-safe with \code{uint64\_t}?''} $\rightarrow$
+  \code{c*100} can exceed 32 bits for large $c$.
+\item \emph{``Headroom target?''} $\rightarrow$ Often $\le$70\% to bound jitter
+  and absorb aperiodic load.
+\end{enumerate}
+\end{gymproblem}
+
+%=====================================================================
+\section{Link to Her Resume}
+%=====================================================================
+
+\begin{resumelink}
+\textbf{DPRAM real-time architecture:} ``At BEL I validated a real-time DPRAM
+polling architecture with sub-1\,ms deterministic latency. That's a single-slot
+flag handshake across dual-port RAM --- producer writes the payload then sets a
+ready flag, consumer reads then clears it, with the ordering and a barrier
+guaranteeing no torn read, and the poll period bounding worst-case latency under
+1\,ms.''
+
+\medskip
+\textbf{Real-time determinism:} ``Real-time means worst-case, not average. The
+timing defects I resolved are the priority-inversion / long-critical-section /
+shared-data family --- I reason about the worst-case confluence and keep
+critical sections and ISRs short, using a mutex (with inheritance) for resource
+protection and queues for data.''
+
+\medskip
+\textbf{Scheduling judgement:} ``Safety-critical work uses fixed-priority
+preemptive scheduling (rate-monotonic) because it's analysable and degrades
+predictably under overload --- which matters more than EDF's higher utilisation
+when you have to certify the timing.''
+
+\medskip
+\small Maps to the resume's real-time DPRAM polling (sub-1\,ms), HSI
+timing-defect resolution, and RTOS (Xenomai) exposure. Keep claims to what the
+resume states; the deep project scripting is Chapter 15, from
+\code{inputs/INTAKE.md} only.
+\end{resumelink}
+
+%=====================================================================
+\section{Self-Test Scorecard}
+%=====================================================================
+
+\begin{scorecard}
+\begin{enumerate}
+\item Define real-time, and hard vs soft.
+\item Name the three task states and what moves a task between them.
+\item Mutex vs binary semaphore vs queue --- one job each.
+\item Explain priority inversion and the fix.
+\item State the four deadlock conditions and the most practical prevention.
+\item Apply the RMS utilisation test to (1,4),(2,8),(2,16).
+\item Why is a binary semaphore a poor substitute for a mutex?
+\item Describe the DPRAM flag handshake and why the write order matters.
+\item Why do safety-critical systems prefer RMS over EDF despite EDF's higher
+  utilisation?
+\item What does the hardware save on Cortex-M exception entry vs what PendSV
+  saves?
+\end{enumerate}
+\end{scorecard}
+
+\begin{answerkey}
+\begin{enumerate}
+\item Correctness depends on meeting deadlines predictably; hard = a miss is
+  failure, soft = a miss degrades quality but is tolerable.
+\item Running, Ready, Blocked; the scheduler (preemption) and events
+  (semaphore/queue/delay) move tasks between them.
+\item Mutex = protect a resource (ownership + inheritance); binary semaphore =
+  signal an event; queue = transfer data with buffering.
+\item A high task blocks on a mutex held by a low task that a medium task
+  preempts; priority inheritance boosts the holder to the waiter's priority.
+\item Mutual exclusion, hold-and-wait, no preemption, circular wait; prevent by
+  a fixed global lock-acquisition order.
+\item $U=0.625 \le 0.78$ (the $n=3$ bound) $\rightarrow$ schedulable.
+\item No ownership (any task can give) and no priority inheritance, so it
+  reintroduces unbounded inversion for resource protection.
+\item Writer fills data then sets the flag; reader sees the flag, reads, clears
+  it. Data-before-flag (with a barrier) prevents the reader seeing a
+  half-written payload.
+\item RMS is statically analysable and degrades predictably (lowest priority
+  misses first); EDF can domino under overload and is harder to certify.
+\item Hardware: R0--R3, R12, LR, PC, xPSR; PendSV: R4--R11 and the PSP swap.
+\end{enumerate}
+\end{answerkey}
+
+\begin{partnote}
+\emph{End of Chapter 9.} Next: \textbf{Control Systems \& PID} --- open vs
+closed loop, the P/I/D terms, tuning (Ziegler--Nichols), overshoot/settling/
+steady-state error, and a discrete PID in C --- the control-theory foundation
+behind closed-loop actuator work.
+\end{partnote}
