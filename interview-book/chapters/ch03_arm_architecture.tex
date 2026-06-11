@@ -1,0 +1,1276 @@
+% chapters/ch03_arm_architecture.tex — Chapter 3: ARM & MCU Architecture
+% Scope (PLAN.md): Cortex-M register set, exception model, NVIC, pipeline,
+% clock tree & PLL, GPIO internals (push-pull vs open-drain), ARM9/LPC3250
+% specifics (her real BEL platform), Harvard vs von Neumann, ARM vs RISC-V.
+% Budget 50 pp, mix 30 Q&A / 14 code / 6 concept.
+% Host snippets verified gcc -Wall -Wextra -std=c11 (zero warnings); two
+% target-only fragments syntax-checked with CMSIS-intrinsic stubs.
+
+\chapter{ARM \& MCU Architecture}
+\label{ch:arm-architecture}
+
+\begin{partnote}
+\textbf{Scope} --- Cortex-M programmer's model (the register set)
+$\rightarrow$ exception model \& the NVIC $\rightarrow$ pipeline $\rightarrow$
+clock tree \& PLL $\rightarrow$ GPIO internals (push-pull vs open-drain)
+$\rightarrow$ ARM9 / LPC3250 specifics (the real BEL platform) $\rightarrow$
+Harvard vs von Neumann $\rightarrow$ ARM-vs-RISC-V awareness. Chapter 2 gave
+you the memory map; this chapter wires it to the silicon that fetches and
+executes from it.
+\end{partnote}
+
+Two CPU families bracket this candidate's work: the \textbf{ARM9 (LPC3250)}
+behind the BEL LCA-Tejas firmware, and the \textbf{Cortex-M} class that
+dominates modern autopilot and avionics boards. An interviewer probes this
+chapter to learn whether you can reason from a datasheet and a register map
+rather than only from an HAL --- the difference between configuring a clock
+tree by hand and copying a CubeMX dump.
+
+%=====================================================================
+\section{Primer}
+%=====================================================================
+
+\subsection{The Cortex-M programmer's model (registers)}
+
+A Cortex-M core exposes sixteen 32-bit core registers:
+\begin{itemize}
+\item \code{R0}--\code{R12} --- general-purpose (\code{R0}--\code{R7} are the
+  ``low'' registers most Thumb instructions can reach).
+\item \code{R13} = \textbf{SP}, the stack pointer --- physically two banked
+  registers, \code{MSP} (main) and \code{PSP} (process), only one active at a
+  time.
+\item \code{R14} = \textbf{LR}, the link register --- holds the return address
+  on a \code{BL}, and a special \code{EXC\_RETURN} value inside an exception.
+\item \code{R15} = \textbf{PC}, the program counter.
+\end{itemize}
+Plus the \textbf{xPSR} (combined Application/Interrupt/Execution status:
+condition flags, the current exception number, the Thumb bit) and the special
+registers \code{PRIMASK}/\code{FAULTMASK}/\code{BASEPRI} (interrupt masking)
+and \code{CONTROL} (privileged/unprivileged, MSP/PSP select). Cortex-M
+executes the \textbf{Thumb-2} instruction set only --- a mix of 16- and 32-bit
+encodings --- so the xPSR Thumb bit is always 1; clearing it faults.
+
+\subsection{Exception model and the NVIC}
+
+The \textbf{NVIC} (Nested Vectored Interrupt Controller) is built into the
+core. ``Vectored'' means each interrupt has a dedicated entry in the
+\textbf{vector table} --- an array of function pointers beginning at the
+table's base (the very first word is not code; it is the \emph{initial
+\code{MSP} value}, and the second is the reset handler). ``Nested'' means a
+higher-priority interrupt can pre-empt a lower-priority handler. Lower
+numerical priority = higher urgency. On exception entry the hardware
+automatically stacks eight registers (\code{R0}--\code{R3}, \code{R12},
+\code{LR}, \code{PC}, \code{xPSR}) so a handler can be a plain C function, and
+optimisations like \textbf{tail-chaining} (skip the unstack/restack between
+back-to-back interrupts) and \textbf{late-arrival} (switch to a
+higher-priority interrupt that arrives mid-stacking) cut latency to a handful
+of deterministic cycles.
+
+\subsection{Pipeline}
+
+Cortex-M0/M0+ use a 2--3 stage pipeline; M3/M4 use a 3-stage
+fetch/decode/execute pipeline (with branch speculation on M3/M4). The
+practical consequence every interviewer wants: because instructions are
+prefetched, a read of \code{PC} reflects the \emph{fetch} stage, so on a
+Thumb-2 Cortex-M \code{PC} reads as the current instruction address $+4$; on
+the older ARM7/ARM9 (deeper pipeline, ARM instructions) it reads $+8$. Knowing
+that number signals you understand prefetch, not just instructions.
+
+\subsection{Clock tree and PLL}
+
+The CPU runs from a clock derived through a tree: a source (internal RC
+\code{HSI}, external crystal \code{HSE}, low-speed \code{LSI}/\code{LSE} for
+the RTC), optionally multiplied by a \textbf{PLL}, then divided by prescalers
+into the core clock and per-bus clocks (AHB/APB). You pick an external crystal
+when you need frequency accuracy --- UART/CAN baud rates and USB will not
+tolerate the few-percent drift of an internal RC. A typical chain:
+\code{HSE} 8\,MHz $\rightarrow$ PLL $\times$ to 168\,MHz core $\rightarrow$
+APB prescalers for the peripherals. Get a prescaler wrong and a timer or baud
+rate is off by an integer factor --- a classic bring-up bug.
+
+\subsection{GPIO internals: push-pull vs open-drain}
+
+A GPIO output drives through one of two structures. \textbf{Push-pull} has
+both a high-side and low-side transistor: it actively drives both 1 and 0 ---
+the default for LEDs, chip-selects, and most signals. \textbf{Open-drain} has
+only the low-side transistor: it can pull the line low or release it (high-Z),
+so the line needs an external (or internal) \textbf{pull-up} to reach logic
+high. Open-drain is mandatory for shared buses like I2C, where multiple
+devices share one wire and any device may pull it low (wired-AND) without
+contention. Each pin also has a mode field (input / output / alternate-function
+/ analog), optional pull-up/pull-down, and a speed/slew setting.
+
+\subsection{ARM9 / LPC3250 vs Cortex-M, and the ISA landscape}
+
+The BEL platform's \textbf{ARM9 (LPC3250)} is an application-class core: a
+5-stage pipeline, separate instruction/data \textbf{caches}, an \textbf{MMU}
+with virtual memory, and a classic \textbf{VIC} (Vectored Interrupt
+Controller) rather than the integrated NVIC --- it runs the ARM (and Thumb)
+instruction sets and typically boots Linux/Xenomai. \textbf{Cortex-M} is a
+microcontroller-class core: usually no cache, an optional \textbf{MPU}
+(protection, not translation), the integrated NVIC, Thumb-2 only, and
+bare-metal/RTOS use. The determinism trade is the headline: caches and an MMU
+buy throughput but add timing variability (a cache miss or TLB walk costs
+cycles), which is why hard-real-time control loops favour the simpler,
+cache-less, tightly-coupled-memory M-class parts. \textbf{Harvard vs von
+Neumann}: ARM9/Cortex-M use a (modified) Harvard layout --- separate
+instruction and data buses for parallel fetch --- versus a von Neumann single
+shared bus. \textbf{ARM vs RISC-V}: same load/store RISC philosophy and
+register style; the difference is the business/ISA model --- ARM is a licensed,
+proprietary ISA with a fixed core catalogue, RISC-V is an open, extensible ISA
+you can implement or extend freely. Expect ``are you aware of RISC-V?'' as a
+forward-looking question, not a deep one.
+
+%=====================================================================
+\section{Q\&A Bank}
+%=====================================================================
+
+\tierbanner{Tier 1 --- Screening (phone / HR-technical)}%
+{Two to four sentences. Core-architecture vocabulary; fumbling these signals
+no register-level experience.}
+
+\question{Q1.1}{What are the three ARM Cortex profiles and what is each for?}
+Cortex-\textbf{M} (microcontroller: deterministic, NVIC, bare-metal/RTOS),
+Cortex-\textbf{R} (real-time: high clock with tight determinism, used in
+storage and automotive safety), and Cortex-\textbf{A} (application: MMU,
+caches, runs Linux/Android). The autopilot/MCU work is M-class; the LPC3250
+ARM9 is closest to the A-class application style.
+
+\question{Q1.2}{Name the special-purpose core registers \code{R13}--\code{R15}.}
+\code{R13} is the stack pointer (SP), \code{R14} the link register (LR, return
+address), and \code{R15} the program counter (PC). \code{R0}--\code{R12} are
+general-purpose. On Cortex-M, SP is banked into \code{MSP} and \code{PSP}.
+
+\question{Q1.3}{What instruction set does Cortex-M run?}
+Thumb-2 only --- a blend of 16-bit and 32-bit Thumb encodings for code
+density. It does not run the classic 32-bit ARM instruction set, and the xPSR
+Thumb bit must stay 1. ARM9, by contrast, runs both ARM and Thumb.
+
+\question{Q1.4}{What is the vector table and what is its first entry?}
+A table of handler addresses (function pointers), one per exception/interrupt,
+that the core indexes on an exception. On Cortex-M the very first word is not
+code --- it is the initial \code{MSP} (stack-pointer) value loaded at reset;
+the second word is the reset handler's address.
+
+\question{Q1.5}{Harvard vs von Neumann --- one line.}
+Harvard uses separate buses (and often memories) for instructions and data, so
+a fetch and a data access can happen in parallel; von Neumann shares one bus
+for both. Cortex-M and ARM9 are (modified) Harvard.
+
+\question{Q1.6}{What does the NVIC do?}
+It is the Cortex-M's built-in interrupt controller: it holds per-interrupt
+enable and priority, vectors each interrupt to its handler, and supports
+nesting (pre-emption by higher priority). Lower priority \emph{number} means
+higher urgency.
+
+\question{Q1.7}{What is SysTick?}
+A small 24-bit down-counter built into every Cortex-M, intended as the
+operating-system tick. It reloads from a programmed value and raises the
+SysTick exception at a fixed period --- the heartbeat an RTOS uses for
+scheduling and timeouts.
+
+\question{Q1.8}{What is a PLL in the clock tree?}
+A phase-locked loop that multiplies a reference clock up to a higher
+frequency, letting an 8\,MHz crystal drive a 168\,MHz core. The clock tree then
+divides that down with prescalers for the various peripheral buses.
+
+\question{Q1.9}{Push-pull vs open-drain output?}
+Push-pull actively drives both high and low. Open-drain can only pull low or
+release (high-Z) and needs a pull-up resistor to reach high; it's required for
+shared wired-AND buses like I2C.
+
+\question{Q1.10}{Where does the core start executing after reset?}
+It loads the initial \code{MSP} from vector-table word 0, then loads the PC
+from word 1 (the reset handler) and begins there. The reset handler runs the
+startup code (Chapter 2) before \code{main}.
+
+\tierbanner{Tier 2 --- Core technical (panel round)}%
+{A short paragraph. The panel checks you've configured these, not just read
+about them.}
+
+\question{Q2.1}{Why does Cortex-M have two stack pointers, \code{MSP} and
+\code{PSP}?}
+To separate kernel/exception stacks from task stacks. After reset everything
+uses \code{MSP}; an RTOS then runs each task on its own \code{PSP} while
+exceptions and the kernel always use \code{MSP}. This means a task stack
+overflow doesn't corrupt the exception stack, each task can be sized
+independently, and an MPU can protect task stacks from one another. The
+\code{CONTROL} register selects which SP thread mode uses; handler mode always
+uses \code{MSP}.
+
+\question{Q2.2}{Distinguish thread vs handler mode and privileged vs
+unprivileged.}
+\textbf{Thread} mode runs normal application code; \textbf{handler} mode runs
+exception/interrupt handlers (and always uses \code{MSP}, always privileged).
+Orthogonally, code is \textbf{privileged} (full access to all registers/
+instructions) or \textbf{unprivileged} (restricted --- can't touch certain
+system registers, subject to MPU rules). After reset you're in privileged
+thread mode; an RTOS may drop tasks to unprivileged thread mode so a misbehaving
+task can't reconfigure the system, with the kernel staying privileged.
+
+\question{Q2.3}{On a Cortex-M exception, what does the hardware stack
+automatically?}
+Eight words: \code{R0}--\code{R3}, \code{R12}, \code{LR}, the return
+\code{PC}, and \code{xPSR} (plus the FPU registers if lazy stacking is off and
+the FPU was used). This is the ``exception stack frame.'' Because the
+caller-saved registers are preserved by hardware, an interrupt handler can be
+an ordinary C function with no special prologue. \code{LR} is loaded with a
+special \code{EXC\_RETURN} code that tells the core which stack/mode to return
+to.
+
+\question{Q2.4}{Explain tail-chaining and late-arrival.}
+Both cut interrupt latency. \textbf{Tail-chaining}: when one handler finishes
+and another interrupt is already pending, the core skips the
+unstack-then-restack and jumps straight to the next handler, saving the ~12
+cycles of stack churn. \textbf{Late-arrival}: if a higher-priority interrupt
+asserts while the core is still stacking for a lower-priority one, the core
+redirects to the higher-priority handler first, reusing the in-progress stack
+push. Both are automatic and make Cortex-M interrupt timing tight and
+predictable.
+
+\question{Q2.5}{What is NVIC priority grouping (pre-empt vs sub-priority)?}
+Each interrupt's priority byte is split by the \code{PRIGROUP} field into
+\emph{pre-emption} (group) priority and \emph{sub}-priority. Pre-emption
+priority decides who can interrupt whom; sub-priority only breaks ties among
+\emph{simultaneously pending} interrupts of equal pre-emption level (it never
+causes pre-emption). With 4 implemented priority bits you choose, e.g., 2 bits
+pre-empt / 2 bits sub. The encoding (built in the Coding Gym) left-justifies
+the value into the top bits of the 8-bit field, because not all 8 bits are
+implemented.
+
+\question{Q2.6}{Why does reading the PC return the current instruction
+address plus a constant?}
+Because of the pipeline prefetch: by the time an instruction executes, the PC
+has already advanced to fetch ahead. On a Thumb-2 Cortex-M the read value is
+instruction\,$+4$; on the 5-stage ARM7/ARM9 it is instruction\,$+8$. This used
+to matter for PC-relative addressing and hand-written position-independent
+code; today it's mostly an understanding-check, but it also explains why
+literal pools sit a fixed offset from the access.
+
+\question{Q2.7}{How do you configure a pin for a peripheral (alternate
+function) rather than plain GPIO?}
+Set the pin's mode field to alternate-function (on STM32, the 2-bit
+\code{MODER} field to \code{0b10}) and select \emph{which} peripheral via the
+alternate-function mux register (\code{AFRL}/\code{AFRH}), plus output type,
+speed, and pull settings. The mux exists because one pin can route to several
+peripherals (USART\_TX, a timer channel, SPI\_MOSI), and only one may own it
+at a time --- getting the AF number wrong is a frequent ``the UART is dead''
+bring-up bug.
+
+\question{Q2.8}{Why does an I2C bus use open-drain with pull-ups, and how do
+you size the pull-up?}
+I2C is a shared, multi-master wired-AND bus: any device must be able to pull
+\code{SDA}/\code{SCL} low while others release, with no two devices ever
+driving opposite levels (which push-pull would short). Open-drain gives exactly
+that --- drive low or release. The pull-up restores the high level, and its
+value trades speed against power: too large and the RC rise time (pull-up
+$\times$ bus capacitance) violates the I2C timing at 400\,kHz; too small and
+the low-side sink current is wasted. Typical values are a few k$\Omega$,
+computed from the bus capacitance and the rise-time limit in the spec.
+
+\question{Q2.9}{Name the common clock sources and when you'd pick an external
+crystal.}
+\code{HSI} (internal high-speed RC --- fast start, ~1\% accuracy),
+\code{HSE} (external crystal/oscillator --- accurate, slower to stabilise),
+\code{LSI} (internal low-speed RC for the watchdog), and \code{LSE} (external
+32.768\,kHz crystal for the RTC). You choose \code{HSE} whenever timing
+accuracy matters --- USB, CAN, and precise UART baud rates need the crystal's
+stability; the internal RC drifts with temperature and voltage enough to break
+them.
+
+\question{Q2.10}{What is bit-banding and why does it exist?}
+On Cortex-M3/M4 a 1\,MB region of SRAM (and of the peripheral space) is mirrored
+by a 32\,MB ``bit-band alias'' region where each \emph{word} maps to a single
+\emph{bit} of the underlying memory. Writing 0/1 to an alias word atomically
+sets/clears one bit without a read-modify-write, which avoids the
+interrupt-between-read-and-write race on a shared flag or register. It exists
+to make single-bit updates atomic and code-simple; the alias address is a
+fixed arithmetic function of the real address and bit number (Coding Gym).
+
+\question{Q2.11}{What is the difference between an MPU and an MMU?}
+An \textbf{MPU} (Cortex-M, and Cortex-R) enforces \emph{protection}: it divides
+the physical address space into a handful of regions with access permissions
+(read/write/execute, privileged/unprivileged) and faults on violation --- but
+it does \emph{not} translate addresses. An \textbf{MMU} (Cortex-A, ARM9)
+additionally does \emph{virtual-to-physical translation} via page tables, giving
+each process its own address space. The LPC3250 has an MMU (hence it runs
+Linux/Xenomai with virtual memory); a Cortex-M autopilot part has at most an
+MPU, used to guard task stacks and trap null-pointer/overflow accesses while
+keeping timing deterministic.
+
+\question{Q2.12}{Why might a write to a peripheral register not take effect
+before the next instruction, and how do you force ordering?}
+Writes can be buffered, and on cores with caches/write buffers or weakly-ordered
+memory the store may complete out of order with respect to following accesses.
+The fix is a barrier: a \textbf{DSB} (data synchronisation barrier) ensures the
+memory access completes before execution continues, and a \textbf{DMB} orders
+memory accesses relative to each other; an \textbf{ISB} flushes the pipeline
+after, say, changing the vector table or clock. The common real bug is
+reconfiguring a clock or NVIC register and immediately relying on it without a
+barrier. (Peripheral regions on Cortex-M are normally ``Device'' memory, which
+limits reordering, but a barrier is still required in these specific cases.)
+
+\tierbanner{Tier 3 --- Trap \& depth (principal-engineer level)}%
+{A paragraph plus the trap. These map directly onto the ARM9-vs-Cortex-M
+judgement the BEL platform demands.}
+
+\question{Q3.1}{Your ISR sets a \code{volatile} flag the main loop polls, yet
+sometimes the main loop ``misses'' it on a Cortex-M. Architecturally, what
+could be happening?}
+\code{volatile} forces the re-read but does nothing about \emph{ordering} or
+atomicity. Several architectural culprits: (1) the flag update and the data it
+guards are written in the wrong order and, without a \code{DMB}, the main loop
+sees the flag before the data; (2) the access is a multi-byte value torn by the
+interrupt; (3) on a part with a write buffer the store hasn't drained when
+expected. The robust pattern is to write the payload, issue a barrier, then set
+the flag (single word), and on the reader side read the flag then barrier then
+the payload --- or use bit-banding / an atomic for the flag. \trap the junior
+answer is ``add volatile,'' which is already present. The senior answer
+separates visibility (volatile) from \emph{ordering} (barriers) and
+\emph{atomicity} --- the same distinction from Chapter 1, now at the bus level,
+and exactly the BEL HSI timing-defect family.
+
+\question{Q3.2}{Walk the LPC3250 (ARM9) vs a Cortex-M autopilot part: what
+changes for a hard-real-time control loop?}
+The ARM9 brings an MMU and I/D caches, so average throughput is high but
+\emph{worst-case} timing is variable: a cache miss, a TLB walk, or an MMU
+page-table access adds cycles you can't always predict, and it usually runs an
+RTOS-on-Linux (Xenomai) to claw back determinism. A Cortex-M has no cache
+(or tightly-coupled memory), single-cycle deterministic SRAM, a fixed-latency
+NVIC with tail-chaining, and runs bare-metal/RTOS --- so the worst-case
+execution time is tight and analysable. \trap the trap is equating ``faster
+clock'' with ``better for control.'' For a flight control inner loop you often
+\emph{want} the simpler M-class determinism; the ARM9's caches/MMU are an
+asset for the Linux-side workload (logging, comms, mission management), not the
+1\,kHz loop. Being able to articulate that split is what marks real avionics
+judgement --- and it's the LPC3250 platform on the resume.
+
+\question{Q3.3}{Why is the first vector-table entry the initial stack pointer
+and not a reset instruction --- and what breaks if it's wrong?}
+Because the core must have a valid stack \emph{before} it can run any C,
+including the reset handler, the hardware loads \code{MSP} from word 0 of the
+table at reset, then the PC from word 1. If word 0 points at a bad/too-small
+RAM address, the very first push in the reset handler corrupts memory or faults
+before \code{main} --- a board that ``does nothing at all'' on power-up. \trap
+candidates assume execution simply ``starts at address 0''; the depth is that
+\emph{stack setup precedes the first instruction the programmer wrote}, which
+is also why a wrong \code{VTOR}/linker-script table placement causes
+boot-before-main failures that vanish under a debugger that set SP for you.
+
+\question{Q3.4}{Sub-priority never causes pre-emption --- so what is it
+actually good for, and give a failure if you misuse the grouping?}
+Sub-priority only orders interrupts that are \emph{pending at the same instant}
+and share the same pre-emption level; it decides who runs first but never
+interrupts a running handler. Its use is to impose a deterministic service
+order among a cluster of equally-urgent sources (e.g.\ several sensor IRQs)
+without letting them pre-empt each other and nest stacks. Misuse: if you put a
+time-critical interrupt (say a motor-commutation or a CCDL sync) at a high
+\emph{sub}-priority but the same \emph{pre-emption} level as a long-running
+handler, it cannot pre-empt and will wait --- blowing its deadline. \trap the
+trap is assuming ``higher priority number field'' means ``will pre-empt''; only
+the pre-emption bits do. Set \code{PRIGROUP} so genuinely pre-emptive sources
+get distinct group priorities.
+
+\question{Q3.5}{ARM is bi-endian --- what does that mean, and why does it
+matter for the 1553B/RS422 parsing on the resume?}
+ARM cores can be configured for little- or big-endian data accesses (the BE-8
+byte-invariant scheme on modern cores), though a given SoC usually fixes one in
+hardware/boot. It matters because the CPU's native byte order may differ from a
+bus's defined order: many avionics protocols (and ``network byte order'') are
+big-endian, while the ARM part is typically little-endian, so multi-byte fields
+must be swapped at the boundary. \trap the trap is assuming the struct overlay
+``just works'' because both ends are ARM --- endianness is a \emph{protocol}
+property, not a CPU coincidence, so you convert explicitly (Chapter 1's byte
+swaps). This is precisely the discipline behind the resume's byte-level 1553B
+and RS422 telemetry parsing.
+
+\question{Q3.6}{What is lazy FPU stacking and what subtle bug does it
+introduce?}
+To keep interrupt latency low, Cortex-M4F doesn't push the 17 FPU registers on
+every exception entry; it reserves space and only actually stacks them
+\emph{if and when} the handler uses the FPU (``lazy stacking''). The subtle
+bug: if you measure or rely on a fixed exception-stack size, or if a handler
+unexpectedly touches the FPU (a library call, a \code{float} in an ISR), the
+lazy stack push happens and your stack-budget assumptions shift. \trap the depth
+is knowing that an innocent \code{float} operation in an ISR can change
+stacking behaviour and latency; many shops simply forbid FP in interrupt
+context, or configure stacking explicitly, rather than reason about it
+per-handler.
+
+\question{Q3.7}{Why can ``it works under the debugger but not from reset''
+have an \emph{architectural} (not just startup) cause?}
+Beyond the Chapter-2 startup issues, architectural causes include: the debugger
+sets \code{MSP}/\code{VTOR}/clock for you (so a wrong vector-table base or
+uninitialised clock only bites from cold reset); the debugger halts before a
+watchdog can fire, masking a watchdog-reset loop; debug mode may disable certain
+low-power/clock-gating behaviour; and breakpoints serialise execution, hiding
+race/ordering bugs that need a barrier. \trap the trap is assuming the debugger
+is a faithful mirror of reset --- it is a privileged environment that has
+already done initialisation and altered timing. The defensible method is to
+reproduce from a true power-on reset and inspect \code{MSP}, \code{VTOR}, the
+clock-config registers, and the watchdog status early in the reset handler.
+
+\question{Q3.8}{Are you aware of RISC-V, and how does it relate to your ARM
+experience?}
+Yes --- RISC-V is an open, royalty-free, modular ISA built on the same
+load/store RISC principles as ARM: a similar general-purpose register file,
+fixed-length base encodings with optional standard extensions (M for multiply,
+A for atomics, F/D for floating point, C for compressed/Thumb-like density),
+and a comparable privileged/exception model. The transferable skills are nearly
+total --- memory maps, interrupts, barriers, peripheral register discipline,
+toolchain/linker concepts all carry over; the differences are the ISA
+governance (open vs ARM's licensed cores) and that you may meet vendor-specific
+core implementations. \trap this is an awareness question, not a depth trap ---
+the strong answer shows you understand it's the \emph{same discipline, different
+ISA} and that you can pick it up, without overclaiming hands-on time you don't
+have. (Honesty about scope scores higher here than bluffing.)
+
+%=====================================================================
+\section{Coding Gym}
+%=====================================================================
+
+\begin{partnote}
+Architecture is learned at the register level. Problems 1--11 and 14 are
+host-compilable register/clock \emph{models} (verified under
+\code{gcc -Wall -Wextra -std=c11}); problems 12--13 are \code{// target-only}
+(they use CMSIS core intrinsics / fixed peripheral addresses) and are shown as
+the real on-target code --- syntax-validated against intrinsic stubs.
+\end{partnote}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Atomic GPIO write via \code{BSRR}}
+
+\textbf{Problem.} Model a GPIO peripheral and set/clear a pin atomically using
+the set/reset register (\code{BSRR}) instead of a read-modify-write on the
+output register.
+
+\textbf{Hints.}
+\begin{itemize}
+\item \code{BSRR} low 16 bits set a pin; high 16 bits reset it --- one write,
+  no read.
+\item A single store can't be split by an interrupt, so no lost-update race.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+typedef struct {
+    volatile uint32_t MODER;
+    volatile uint32_t ODR;
+    volatile uint32_t BSRR;   /* [15:0]=set, [31:16]=reset, write-1 atomic */
+} gpio_t;
+
+static void gpio_write(gpio_t *g, unsigned pin, int val) {
+    g->BSRR = val ? (1u << pin) : (1u << (pin + 16u));   /* one atomic store */
+}
+static void gpio_apply(gpio_t *g) {        /* models the hardware's action */
+    uint32_t set = g->BSRR & 0xFFFFu;
+    uint32_t rst = (g->BSRR >> 16) & 0xFFFFu;
+    g->ODR = (g->ODR | set) & ~rst;
+    g->BSRR = 0;
+}
+
+int main(void) {
+    gpio_t g = {0};
+    gpio_write(&g, 5, 1); gpio_apply(&g);
+    gpio_write(&g, 5, 0); gpio_apply(&g);
+    gpio_write(&g, 3, 1); gpio_apply(&g);
+    printf("ODR=0x%08X\n", g.ODR);    /* ODR=0x00000008 (bit 3) */
+    return 0;
+}
+\end{cgym}
+
+The point is the \emph{atomicity}: \code{ODR |= (1<<pin)} is a
+read-modify-write an interrupt can tear (Chapter 1), but \code{BSRR = (1<<pin)}
+is a single store the hardware applies indivisibly --- the correct way to drive
+a pin shared between an ISR and the main loop.
+
+\followups
+\begin{enumerate}
+\item \emph{``Set and clear different pins in one operation.''} $\rightarrow$
+  \code{BSRR = set\_mask | (reset\_mask << 16);}.
+\item \emph{``Why not just \code{ODR |= mask}?''} $\rightarrow$ It's an RMW;
+  an interrupt that writes \code{ODR} between your read and write is lost.
+\item \emph{``How does bit-banding achieve the same thing?''} $\rightarrow$
+  A single-bit alias write (problem 7) is also atomic.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Configure a pin's 2-bit \code{MODER} field}
+
+\textbf{Problem.} Write \code{set\_moder(reg, pin, mode)} that programs the
+2-bit mode field for a pin without disturbing the others.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Two config bits per pin $\rightarrow$ shift = \code{pin*2}.
+\item Clear the field, then OR in the new 2-bit mode.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint32_t set_moder(uint32_t moder, unsigned pin, uint32_t mode2) {
+    uint32_t shift = pin * 2u;          /* 2 config bits per pin */
+    moder &= ~(0x3u << shift);          /* clear the field       */
+    moder |= (mode2 & 0x3u) << shift;   /* write the new mode    */
+    return moder;
+}
+
+int main(void) {
+    uint32_t m = 0;
+    m = set_moder(m, 5, 0x1u);   /* pin5 = output (01)   */
+    m = set_moder(m, 6, 0x2u);   /* pin6 = alt-func (10) */
+    printf("MODER=0x%08X\n", m); /* MODER=0x00002400 */
+    return 0;
+}
+\end{cgym}
+
+This clear-then-set is the universal register-field idiom: mask the field to
+zero, OR in the new value. Modes are typically \code{00}=input,
+\code{01}=output, \code{10}=alternate-function, \code{11}=analog. Forgetting
+the clear (\code{|=} only) leaves stale bits and a pin stuck in the wrong mode.
+
+\followups
+\begin{enumerate}
+\item \emph{``Read back a pin's mode.''} $\rightarrow$
+  \code{(moder >> (pin*2)) \& 0x3u}.
+\item \emph{``Generalise to any field width.''} $\rightarrow$ See the generic
+  \code{field\_write} (problem 9).
+\item \emph{``Why mask \code{mode2 \& 0x3}?''} $\rightarrow$ Defensive ---
+  stops a bad argument from bleeding into the neighbouring pin's field.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Encode an NVIC priority (pre-empt + sub)}
+
+\textbf{Problem.} Implement the CMSIS-style priority encoder: given the
+priority grouping and a pre-emption/sub-priority pair, produce the value to
+write into the 8-bit priority field.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Pre-empt bits = \code{7 - group} (capped at the implemented priority
+  bits); the rest are sub-priority bits.
+\item Left-justify the result into the top of the 8-bit field
+  (\code{<< (8 - PRIO\_BITS)}).
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+#define PRIO_BITS 4u    /* STM32 implements 4 priority bits */
+
+static uint32_t encode_priority(uint32_t group, uint32_t preempt, uint32_t sub) {
+    uint32_t g        = group & 7u;
+    uint32_t pre_bits = (7u - g) > PRIO_BITS ? PRIO_BITS : (7u - g);
+    uint32_t sub_bits = ((g + PRIO_BITS) < 7u) ? 0u : (g + PRIO_BITS - 7u);
+    uint32_t pre_mask = (1u << pre_bits) - 1u;
+    uint32_t sub_mask = (1u << sub_bits) - 1u;
+    return ((preempt & pre_mask) << sub_bits) | (sub & sub_mask);
+}
+
+int main(void) {
+    uint32_t enc = encode_priority(3u, 2u, 1u);
+    uint32_t reg = enc << (8u - PRIO_BITS);   /* left-justify in the byte */
+    printf("enc=%u reg=0x%02X\n", enc, reg);  /* enc=2 reg=0x20 */
+    return 0;
+}
+\end{cgym}
+
+The split is set once globally by \code{PRIGROUP}; this function packs a
+particular interrupt's two numbers into the field. The
+left-justification matters because only the top \code{PRIO\_BITS} of the byte
+are implemented --- writing the raw small number into the low bits sets a
+priority of (effectively) zero on the silicon.
+
+\followups
+\begin{enumerate}
+\item \emph{``With group=3 and 4 bits, how many pre-empt levels?''}
+  $\rightarrow$ \code{7-3=4} pre-empt bits capped at 4 $\rightarrow$ 16
+  pre-emption levels, 0 sub-bits.
+\item \emph{``Why left-justify?''} $\rightarrow$ Unimplemented low bits read
+  as zero; significance lives in the high bits.
+\item \emph{``Decode a register value back to (preempt, sub).''} $\rightarrow$
+  Reverse the shifts/masks --- a good whiteboard follow-up.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Compute \code{SYSCLK} through the PLL}
+
+\textbf{Problem.} Given an external crystal and the PLL dividers/multiplier,
+compute the core clock.
+
+\textbf{Hints.}
+\begin{itemize}
+\item STM32F4 form: \code{VCO = HSE / M * N}, \code{SYSCLK = VCO / P}.
+\item Divide before multiply to keep the intermediate in 32 bits.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint32_t sysclk(uint32_t hse, uint32_t M, uint32_t N, uint32_t P) {
+    return (hse / M * N) / P;     /* VCO = HSE/M*N ; SYSCLK = VCO/P */
+}
+
+int main(void) {
+    printf("SYSCLK=%u Hz\n", sysclk(8000000u, 8u, 336u, 2u));  /* 168000000 */
+    return 0;
+}
+\end{cgym}
+
+\code{8\,MHz / 8 = 1\,MHz} (the PLL input, which the datasheet wants near
+1--2\,MHz), then $\times 336 = 336$\,MHz VCO, then $/\,2 = 168$\,MHz core. Getting
+\code{M} wrong pushes the VCO out of its legal range; getting \code{P} wrong
+runs the core at half or double the intended clock --- and every derived baud
+rate and timer with it.
+
+\followups
+\begin{enumerate}
+\item \emph{``Why divide by M \emph{before} multiplying by N?''} $\rightarrow$
+  Keeps the PLL input in spec and avoids 32-bit overflow of the product.
+\item \emph{``Add the APB1 prescaler to get the timer clock.''} $\rightarrow$
+  Divide \code{SYSCLK} by AHB then APB1 prescalers (and note the APB timer
+  $\times2$ rule).
+\item \emph{``Pick M,N,P for 100\,MHz from a 25\,MHz crystal.''} $\rightarrow$
+  Constraint-solve within the VCO/input ranges.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{SysTick reload value (with the 24-bit limit)}
+
+\textbf{Problem.} Compute the SysTick reload for a desired tick period, and
+reject periods that don't fit the 24-bit counter.
+
+\textbf{Hints.}
+\begin{itemize}
+\item \code{reload = ticks - 1}, where \code{ticks = freq * period}.
+\item The counter is 24-bit: \code{ticks} must be in \code{1..0x1000000}.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+#include <stdbool.h>
+
+static bool systick_reload(uint32_t freq, uint32_t period_us, uint32_t *reload) {
+    uint64_t ticks = (uint64_t)freq * period_us / 1000000u;
+    if (ticks == 0u || ticks > 0x1000000ull) return false;   /* 24-bit range */
+    *reload = (uint32_t)(ticks - 1u);
+    return true;
+}
+
+int main(void) {
+    uint32_t r = 0;
+    bool ok = systick_reload(168000000u, 1000u, &r);   /* 1 ms @ 168 MHz */
+    printf("ok=%d reload=%u\n", ok, r);                 /* ok=1 reload=167999 */
+    return 0;
+}
+\end{cgym}
+
+The \code{-1} is because the counter counts \code{reload} down to 0 inclusive,
+so it spans \code{reload+1} ticks. The 64-bit intermediate avoids overflow when
+\code{freq * period} exceeds 32 bits. At 168\,MHz a 1\,ms tick needs 168000
+counts --- comfortably inside 24 bits; a 200\,ms tick would not fit, which is
+why long periods use a hardware timer or a software prescaler instead.
+
+\followups
+\begin{enumerate}
+\item \emph{``Longest period SysTick can time at 168\,MHz?''} $\rightarrow$
+  \code{0x1000000 / 168e6} $\approx$ 100\,ms.
+\item \emph{``How does an RTOS use this?''} $\rightarrow$ As the scheduler
+  tick; the handler increments the tick count and runs the scheduler.
+\item \emph{``Clock source choice for SysTick?''} $\rightarrow$ Core clock or
+  core/8; affects the reload value.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Locate an interrupt in the NVIC \code{ISER} array}
+
+\textbf{Problem.} Given an IRQ number, compute which \code{ISER[]} word and
+which bit enable it.
+
+\textbf{Hints.}
+\begin{itemize}
+\item 32 interrupts per word: word = \code{irqn / 32}, bit = \code{irqn \% 32}.
+\item Use shifts/masks, not division, on the target.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+static void nvic_loc(unsigned irqn, unsigned *reg, unsigned *bit) {
+    *reg = irqn >> 5;     /* irqn / 32 -> ISER[] index */
+    *bit = irqn & 31u;    /* irqn % 32 -> bit position */
+}
+
+int main(void) {
+    unsigned reg, bit;
+    nvic_loc(40u, &reg, &bit);          /* IRQ40 -> ISER[1], bit 8 */
+    printf("ISER[%u] bit %u\n", reg, bit);
+    return 0;
+}
+\end{cgym}
+
+To enable IRQ 40 the target does
+\code{NVIC->ISER[1] = (1u << 8)} --- and note the NVIC enable registers are
+\emph{write-1-to-set}: writing a 1 enables that interrupt and writing 0 has no
+effect, so there's no read-modify-write race (a separate \code{ICER} array
+clears). \code{>>5} and \code{\&31} are the cheap power-of-two forms of
+\code{/32} and \code{\%32}.
+
+\followups
+\begin{enumerate}
+\item \emph{``Why is write-1-to-set important here?''} $\rightarrow$ Enabling
+  one IRQ can't accidentally disable another --- no RMW needed.
+\item \emph{``How do you disable it?''} $\rightarrow$ Write the same bit to
+  \code{ICER[reg]} (interrupt clear-enable).
+\item \emph{``Set its priority too.''} $\rightarrow$ \code{NVIC->IP[irqn]} =
+  the encoded byte from problem 3.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Cortex-M bit-band alias address}
+
+\textbf{Problem.} Compute the SRAM bit-band \emph{alias} address that maps to a
+specific bit of a specific word.
+
+\textbf{Hints.}
+\begin{itemize}
+\item SRAM bit-band region base \code{0x20000000}, alias base
+  \code{0x22000000}.
+\item \code{alias = aliasBase + (byteOffset * 32) + (bit * 4)}.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint32_t bitband_alias(uint32_t addr, uint32_t bit) {
+    uint32_t base = 0x20000000u, alias = 0x22000000u;
+    return alias + (addr - base) * 32u + bit * 4u;
+}
+
+int main(void) {
+    printf("0x%08X\n", bitband_alias(0x20000300u, 2u));   /* 0x22006008 */
+    return 0;
+}
+\end{cgym}
+
+Each underlying \emph{bit} gets its own 32-bit \emph{word} in the alias region
+(hence \code{*32} per byte and \code{*4} per bit). Writing 1 to the alias word
+sets that single bit atomically --- no read-modify-write, so an interrupt can't
+corrupt a neighbouring bit. It's a Cortex-M3/M4 feature (M0/M0+ omit it), used
+for atomic flags and single-bit peripheral control.
+
+\followups
+\begin{enumerate}
+\item \emph{``Peripheral bit-band region?''} $\rightarrow$ Base
+  \code{0x40000000}, alias \code{0x42000000}, same formula.
+\item \emph{``Why is this atomic without a barrier-protected RMW?''}
+  $\rightarrow$ The hardware turns the word write into an atomic bit update.
+\item \emph{``Cortex-M0 has no bit-banding --- alternative?''} $\rightarrow$
+  \code{BSRR}-style set/reset registers, or a critical section.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{The vector table is an array of function pointers}
+
+\textbf{Problem.} Model the vector table as a \code{const} array of function
+pointers and dispatch through it, the way the core does on an exception.
+
+\textbf{Hints.}
+\begin{itemize}
+\item \code{typedef void (*isr\_t)(void);} then an array of handlers.
+\item On target the array is placed at the table base and \code{VTOR} points
+  at it.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+#include <stddef.h>
+
+typedef void (*isr_t)(void);
+
+static void reset_handler(void)     { }
+static void nmi_handler(void)       { }
+static void hardfault_handler(void) { }
+
+static const isr_t vectors[] = {        /* the table is just function pointers */
+    reset_handler, nmi_handler, hardfault_handler
+};
+
+int main(void) {
+    vectors[0]();                        /* dispatch as the CPU would */
+    printf("entries=%zu\n", sizeof vectors / sizeof vectors[0]);  /* 3 */
+    return 0;
+}
+\end{cgym}
+
+This is the whole secret behind ``vectored'' interrupts: the controller indexes
+an array of handler addresses, so dispatch is O(1) with no software
+\code{switch}. On a real Cortex-M the first element is instead the initial
+\code{MSP} value (an address, not a function), the table is placed by the
+linker, and \code{VTOR} holds its base so it can be relocated (e.g.\ for a
+bootloader). It is the same function-pointer-table idea as the command parser
+in Chapter 1.
+
+\followups
+\begin{enumerate}
+\item \emph{``What's really at index 0 on hardware?''} $\rightarrow$ The
+  initial stack pointer, not a function (problem-3 trap of Q3.3).
+\item \emph{``Why is \code{VTOR} useful?''} $\rightarrow$ Relocate the table
+  for bootloader/app split or RAM-based vectors.
+\item \emph{``Install a handler at runtime.''} $\rightarrow$ Copy the table to
+  RAM, point \code{VTOR} at it, write the entry.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Generic register-field read-modify-write}
+
+\textbf{Problem.} Write \code{field\_write(reg, pos, width, val)} that updates
+an arbitrary bitfield of a register value.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Build a mask \code{((1<<width)-1) << pos}.
+\item Clear with \code{\& \textasciitilde mask}, set with the masked,
+  shifted value.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint32_t field_write(uint32_t reg, unsigned pos, unsigned width,
+                            uint32_t val) {
+    uint32_t mask = ((1u << width) - 1u) << pos;
+    return (reg & ~mask) | ((val << pos) & mask);   /* clear field, set value */
+}
+
+int main(void) {
+    uint32_t r = 0xFFFFFFFFu;
+    r = field_write(r, 8u, 4u, 0x5u);   /* bits[11:8] = 0x5 */
+    printf("0x%08X\n", r);             /* 0xFFFFF5FF */
+    return 0;
+}
+\end{cgym}
+
+This is the reusable version of problem 2: any peripheral field (a prescaler, a
+mode, a baud-fraction) is programmed by clearing its mask and OR-ing the new
+value. The double-mask (\code{(val<<pos) \& mask}) is defensive against a
+\code{val} wider than \code{width} spilling into adjacent fields. On real
+hardware \code{reg} is \code{volatile}, so this is one read and one write of the
+register.
+
+\followups
+\begin{enumerate}
+\item \emph{``\code{width == 32} breaks \code{1u << 32}.''} $\rightarrow$
+  Undefined behaviour; special-case full-width or use a 64-bit temp.
+\item \emph{``Make a matching \code{field\_read}.''} $\rightarrow$
+  \code{(reg >> pos) \& ((1u<<width)-1u)}.
+\item \emph{``Why is the volatile RMW still racy vs an ISR?''} $\rightarrow$
+  Read and write are separate; an interrupt between them is lost --- use
+  \code{BSRR}/bit-band or a critical section.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{CLZ-based priority encoder (highest pending interrupt)}
+
+\textbf{Problem.} Given a 32-bit ``pending'' bitmask, return the index of the
+highest set bit, using count-leading-zeros. Note the hardware instruction.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Highest set-bit index = \code{31 - clz(x)}.
+\item ARM has a single-cycle \code{CLZ} instruction (\code{\_\_builtin\_clz} /
+  \code{\_\_CLZ}); here, a portable fallback.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static int clz32(uint32_t x) {           /* portable count-leading-zeros */
+    if (x == 0u) return 32;
+    int n = 0;
+    while ((x & 0x80000000u) == 0u) { x <<= 1; n++; }
+    return n;
+}
+static int highest_pending(uint32_t pending) {
+    return pending ? 31 - clz32(pending) : -1;   /* -1 = nothing pending */
+}
+
+int main(void) {
+    printf("top=%d clz1=%d\n", highest_pending(0x00000084u), clz32(1u));
+    /* 0x84 = bits 7 and 2 -> top=7 ; clz32(1)=31 */
+    return 0;
+}
+\end{cgym}
+
+Priority encoders --- ``of all the interrupts asserted, which is the most
+significant?'' --- are exactly what \code{CLZ} accelerates, which is why ARM
+made it a single instruction and why RTOS schedulers use it to find the highest
+ready-task priority in O(1). The portable loop shows the logic; on target you'd
+call \code{\_\_CLZ} and let it map to the instruction.
+
+\followups
+\begin{enumerate}
+\item \emph{``Lowest set bit instead.''} $\rightarrow$ \code{x \& -x} isolates
+  it; index via \code{clz}/de-Bruijn.
+\item \emph{``How does an O(1) RTOS scheduler use CLZ?''} $\rightarrow$ A
+  ready-bitmask of priorities; \code{CLZ} finds the top priority instantly.
+\item \emph{``\code{\_\_builtin\_clz(0)} is undefined --- why guard it?''}
+  $\rightarrow$ The instruction's result for 0 is defined (32) but the builtin
+  is UB; always handle 0.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Cycle budget for a microsecond delay}
+
+\textbf{Problem.} Convert a delay in microseconds to CPU cycles for a given
+core frequency (the basis of a calibrated busy-wait).
+
+\textbf{Hints.}
+\begin{itemize}
+\item \code{cycles = us * cpu\_hz / 1e6}; use a 64-bit intermediate.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint32_t us_to_cycles(uint32_t us, uint32_t cpu_hz) {
+    return (uint32_t)((uint64_t)us * cpu_hz / 1000000u);
+}
+
+int main(void) {
+    printf("cycles=%u\n", us_to_cycles(10u, 168000000u));   /* 1680 */
+    return 0;
+}
+\end{cgym}
+
+At 168\,MHz, 10\,$\mu$s is 1680 core cycles. A busy-wait loop then needs
+\code{cycles / (cycles-per-loop-iteration)} iterations --- but the honest
+caveat is that loop timing depends on flash wait-states, pipeline, and compiler
+output, so a cycle-accurate delay uses a hardware timer or the \code{DWT}
+cycle counter, not a guessed loop. \trap-adjacent: never ship a
+\code{for}-loop \code{\_\_NOP} delay as if it were calibrated.
+
+\followups
+\begin{enumerate}
+\item \emph{``Use the DWT cycle counter instead.''} $\rightarrow$ Enable
+  \code{DWT->CYCCNT} and spin until it advances by \code{cycles}.
+\item \emph{``Why is a software delay loop fragile?''} $\rightarrow$ Flash
+  wait-states, interrupts, and \code{-O} level all change its duration.
+\item \emph{``Convert cycles back to nanoseconds.''} $\rightarrow$
+  \code{cycles * 1e9 / cpu\_hz} with care for overflow.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Critical section via \code{PRIMASK} (\texttt{// target-only})}
+
+\textbf{Problem.} Implement nestable \code{enter\_critical}/\code{exit\_critical}
+that mask interrupts and \emph{restore} the previous state (not blindly
+re-enable).
+
+\textbf{Hints.}
+\begin{itemize}
+\item Save \code{PRIMASK}, then \code{\_\_disable\_irq()} (\code{CPSID i}).
+\item On exit restore the saved \code{PRIMASK} so nesting works.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+// target-only: uses CMSIS core intrinsics (__get_PRIMASK / __disable_irq / ...)
+
+uint32_t enter_critical(void) {
+    uint32_t primask = __get_PRIMASK();   /* save current interrupt-enable state */
+    __disable_irq();                      /* CPSID i : mask interrupts           */
+    return primask;
+}
+
+void exit_critical(uint32_t primask) {
+    __set_PRIMASK(primask);               /* restore: re-enable only if it was on */
+}
+
+/* usage:
+   uint32_t s = enter_critical();
+   shared_counter++;          // atomic w.r.t. interrupts
+   exit_critical(s);
+*/
+\end{cgym}
+
+The subtlety is \emph{save/restore}, not enable/disable: if you unconditionally
+\code{\_\_enable\_irq()} on exit, a nested critical section would wrongly
+re-enable interrupts at the inner exit. Saving \code{PRIMASK} and restoring it
+makes the sections nest correctly. This is the canonical fix for the
+shared-data races discussed in Chapters 1 and this chapter --- and it should
+wrap the shortest possible code, because it adds interrupt latency.
+
+\followups
+\begin{enumerate}
+\item \emph{``Mask only \emph{some} priorities instead of all.''}
+  $\rightarrow$ Use \code{BASEPRI} so high-priority (e.g.\ safety) interrupts
+  still run.
+\item \emph{``Why save/restore rather than enable?''} $\rightarrow$ To nest
+  correctly and not re-enable inside an already-critical caller.
+\item \emph{``What's the cost?''} $\rightarrow$ Increased worst-case interrupt
+  latency for the masked duration --- keep it tiny.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Memory-mapped peripheral access
+(\texttt{// target-only})}
+
+\textbf{Problem.} Define a UART peripheral as a \code{volatile} register struct
+at its fixed address and write a polled \code{putc}.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Every register is \code{volatile uint32\_t}; the struct order must match
+  the datasheet offsets.
+\item Poll the TX-empty status bit before writing data.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+// target-only: fixed peripheral address and memory-mapped registers
+
+typedef struct {
+    volatile uint32_t SR;    /* status   */
+    volatile uint32_t DR;    /* data     */
+    volatile uint32_t BRR;   /* baud     */
+    volatile uint32_t CR1;   /* control  */
+} uart_regs_t;
+
+#define UART0        ((uart_regs_t *)0x40011000u)
+#define UART_SR_TXE  (1u << 7)
+
+void uart_putc(char c) {
+    while ((UART0->SR & UART_SR_TXE) == 0u) { /* wait for TX-empty */ }
+    UART0->DR = (uint32_t)(unsigned char)c;
+}
+\end{cgym}
+
+Three things make this correct and are exactly what an interviewer checks:
+\code{volatile} on every register (so the poll re-reads \code{SR} and the
+compiler can't hoist it --- Chapter 1), the struct layout matching the
+datasheet's register offsets (so \code{->DR} lands at the right address), and
+the access width being 32-bit as the peripheral expects. This is the
+hand-written form underneath any HAL, and the pattern behind the LPC3250 UART
+driver verification on the resume.
+
+\followups
+\begin{enumerate}
+\item \emph{``Why \code{volatile} on \code{SR} specifically?''} $\rightarrow$
+  Hardware changes it; without \code{volatile} the poll becomes an infinite
+  loop on a cached value.
+\item \emph{``A reserved gap in the register map --- how to model it?''}
+  $\rightarrow$ Insert a \code{volatile uint32\_t RESERVED0;} (or array) to
+  keep offsets correct.
+\item \emph{``Make \code{putc} non-blocking.''} $\rightarrow$ Return a status
+  if \code{TXE} is clear; drive transmission from the TX interrupt + ring
+  buffer (Chapter 4/13).
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Derive a timer prescaler/ARR from the clock tree}
+
+\textbf{Problem.} Given the timer's input clock and a desired update frequency,
+pick a prescaler and compute the auto-reload (\code{ARR}), respecting the
+16-bit limit.
+
+\textbf{Hints.}
+\begin{itemize}
+\item \code{update\_hz = tim\_clk / ((PSC+1)*(ARR+1))}.
+\item Choose \code{PSC} to bring the count into 16-bit range, then solve
+  \code{ARR}.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+#include <stdbool.h>
+
+static bool timer_setup(uint32_t tim_clk, uint32_t target_hz, uint32_t psc,
+                        uint32_t *arr) {
+    uint32_t denom = (psc + 1u) * target_hz;
+    if (denom == 0u) return false;
+    uint32_t arr_plus1 = tim_clk / denom;
+    if (arr_plus1 == 0u || arr_plus1 > 0x10000u) return false;  /* 16-bit ARR */
+    *arr = arr_plus1 - 1u;
+    return true;
+}
+
+int main(void) {
+    uint32_t arr = 0;
+    bool ok = timer_setup(84000000u, 1000u, 83u, &arr);   /* 1 kHz from 84 MHz */
+    printf("ok=%d ARR=%u\n", ok, arr);                     /* PSC=83 -> ARR=999 */
+    return 0;
+}
+\end{cgym}
+
+\code{PSC=83} divides the 84\,MHz timer clock to 1\,MHz, then \code{ARR=999}
+gives \code{1\,MHz / 1000 = 1\,kHz} updates. The two-stage divide (prescaler
+then reload) exists because a single 16-bit reload can't span the whole range
+from a fast clock --- the prescaler coarsely reduces the clock, the reload
+finely sets the period. This is the clock-tree arithmetic behind every PWM
+frequency and timer interrupt (expanded in Chapter 4).
+
+\followups
+\begin{enumerate}
+\item \emph{``Solve for a PWM duty cycle too.''} $\rightarrow$ Set the channel
+  compare \code{CCR = duty * (ARR+1)}.
+\item \emph{``Why not just use a huge \code{PSC}?''} $\rightarrow$ Coarse
+  prescaling loses period resolution; balance \code{PSC} and \code{ARR}.
+\item \emph{``Remember the APB-timer $\times2$ rule.''} $\rightarrow$ When the
+  APB prescaler $\neq 1$, the timer clock is twice the APB clock.
+\end{enumerate}
+\end{gymproblem}
+
+%=====================================================================
+\section{Link to Her Resume}
+%=====================================================================
+
+\begin{resumelink}
+\textbf{ARM9 / LPC3250 judgement:} ``The BEL platform was an ARM9 LPC3250 ---
+an application core with caches and an MMU running Xenomai, which is a different
+determinism profile from a Cortex-M autopilot part. I can explain why a hard
+real-time loop often wants the simpler M-class timing while the ARM9's
+caches/MMU serve the Linux-side comms and logging.''
+
+\medskip
+\textbf{Register-level driver work:} ``Verifying the LPC3250 UART and GPIO
+drivers meant reasoning at the register level --- \code{volatile} peripheral
+structs at fixed addresses, correct access width, and atomic set/clear instead
+of read-modify-write on shared pins. That's underneath any HAL.''
+
+\medskip
+\textbf{Interrupts \& determinism:} ``The HSI timing defects I resolved are the
+NVIC/ordering family --- priority and pre-emption, barriers for write ordering,
+and short critical sections that save and restore \code{PRIMASK} rather than
+blindly re-enabling interrupts.''
+
+\medskip
+\small Maps to concrete resume lines: ARM9 (LPC3250) firmware/driver
+verification at BEL, multi-board bring-up at TASL, and HSI timing-defect
+resolution. Keep claims to what the resume states; the deep project narratives
+are Chapter 15, from \code{inputs/INTAKE.md} only.
+\end{resumelink}
+
+%=====================================================================
+\section{Self-Test Scorecard}
+%=====================================================================
+
+\begin{scorecard}
+\begin{enumerate}
+\item Which core registers are \code{R13}, \code{R14}, \code{R15}?
+\item Why does Cortex-M have both \code{MSP} and \code{PSP}?
+\item What are the first two words of the Cortex-M vector table?
+\item Lower priority \emph{number} on the NVIC means what?
+\item Does sub-priority ever cause pre-emption? What is it for?
+\item Push-pull vs open-drain --- which needs a pull-up and why?
+\item MPU vs MMU --- which translates addresses, which only protects?
+\item On a Thumb-2 Cortex-M, a read of \code{PC} equals the instruction
+  address plus what, and why?
+\item Name two architectural differences between the LPC3250 (ARM9) and a
+  Cortex-M, and the determinism consequence.
+\item Compute \code{SYSCLK} for \code{HSE}=8\,MHz, \code{M}=8, \code{N}=336,
+  \code{P}=2.
+\end{enumerate}
+\end{scorecard}
+
+\begin{answerkey}
+\begin{enumerate}
+\item \code{R13}=SP (banked \code{MSP}/\code{PSP}), \code{R14}=LR (link/return),
+  \code{R15}=PC.
+\item To separate exception/kernel stacks (\code{MSP}) from per-task stacks
+  (\code{PSP}) for isolation and MPU protection.
+\item Word 0 = initial \code{MSP} (stack pointer); word 1 = reset-handler
+  address.
+\item Higher urgency --- it can pre-empt interrupts with a larger priority
+  number.
+\item No --- sub-priority only orders simultaneously-pending interrupts of
+  equal pre-emption level; it never interrupts a running handler.
+\item Open-drain needs a pull-up because it can only pull low or release
+  (high-Z); required for shared wired-AND buses like I2C.
+\item The MMU translates virtual$\rightarrow$physical (ARM9/Cortex-A); the MPU
+  only enforces region permissions (Cortex-M/R), no translation.
+\item Plus 4, because pipeline prefetch has already advanced the PC past the
+  executing instruction (it's $+8$ on ARM7/ARM9).
+\item Any two: ARM9 has caches + MMU + VIC and runs Linux/Xenomai; Cortex-M has
+  no cache, MPU (not MMU), integrated NVIC, bare-metal/RTOS --- the M-class is
+  more timing-deterministic for hard real-time loops.
+\item \code{8\,MHz/8 = 1\,MHz}; then $\times 336 = 336$\,MHz; then $/\,2 =
+  168$\,MHz.
+\end{enumerate}
+\end{answerkey}
+
+\begin{partnote}
+\emph{End of Chapter 3.} Next: \textbf{Interrupts, Timers \& DMA} --- ISR
+rules, latency and jitter, the shared-data problem and its solutions, timer/PWM
+frequency--duty arithmetic, watchdogs, and the DMA-vs-polling-vs-interrupt
+trade --- building directly on the NVIC, SysTick, and timer/clock-tree
+foundations from this chapter.
+\end{partnote}

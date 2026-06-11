@@ -1,0 +1,1980 @@
+% chapters/ch01_embedded_c.tex — Chapter 1: Embedded C Mastery
+% Part 1: pointers -> arrays -> strings -> structs/unions/bitfields -> padding.
+% Part 2 (volatile/const/static/storage classes/typecasting/preprocessor/
+% endianness) will be APPENDED to this file in a later session.
+% All compilable snippets verified with: gcc -Wall -Wextra -std=c11 (zero warnings).
+
+\chapter{Embedded C Mastery}
+\label{ch:embedded-c}
+
+\begin{partnote}
+\textbf{Part 1 of 2} --- Pointers $\rightarrow$ Arrays $\rightarrow$ Strings
+$\rightarrow$ Structs / Unions / Bitfields $\rightarrow$ Padding \& Alignment.
+Part 2 (appended to this chapter later) covers \code{volatile}, \code{const},
+\code{static}, storage classes, typecasting, the preprocessor, and endianness.
+\end{partnote}
+
+This is the make-or-break chapter. In an embedded or avionics interview, every
+panel eventually returns to C fundamentals, because the language \emph{is} the
+hardware interface. The questions below are the ones actually asked at
+screening, panel, and principal-engineer level --- answer them out loud until
+they are reflexes.
+
+%=====================================================================
+\section{Primer}
+%=====================================================================
+
+\subsection{What a pointer actually is}
+
+A pointer is a variable whose value is a memory address. On a 32-bit target
+(e.g.\ the LPC3250/ARM9 in the BEL work, or a Cortex-M autopilot board) a
+pointer is 4 bytes regardless of what it points to; on a 64-bit host it is
+8 bytes. The \emph{type} of a pointer does not change its size --- it tells the
+compiler two things: how many bytes to read or write when the pointer is
+dereferenced, and how far to move when the pointer is incremented.
+
+\begin{cgym}
+int x = 42;
+int *p = &x;   /* p holds the address of x    */
+*p = 7;        /* dereference: write 7 into x */
+\end{cgym}
+
+\code{\&} takes an address; \code{*} (in an expression) dereferences. In a
+\emph{declaration}, \code{*} is part of the type: \code{int *p} means
+``\code{p} is a pointer to int.''
+
+\subsection{Pointer arithmetic is typed}
+
+\code{p + 1} does \textbf{not} add 1 byte. It adds
+\code{1 * sizeof(*p)} bytes. This is the single most common source of
+confusion and the root of many off-by-$N$ memory bugs.
+
+\begin{cgym}
+int arr[4] = {10, 20, 30, 40};
+int *p = arr;     /* points at arr[0]                       */
+p = p + 2;        /* advances 2*4 = 8 bytes on a 32-bit int */
+/* *p is now 30 */
+\end{cgym}
+
+The difference of two pointers into the same array yields the number of
+\emph{elements} between them (type \code{ptrdiff\_t}), not bytes.
+
+\subsection{The hardware reason this matters}
+
+Embedded code constantly casts an integer address to a pointer to talk to a
+peripheral register:
+
+\begin{cgym}
+/* target-only: memory-mapped register access */
+#define UART0_DR (*(volatile unsigned int *)0x40011004u)
+UART0_DR = 'A';   /* write a byte to the UART data register */
+\end{cgym}
+
+If the pointer type is wrong, the access width is wrong, and a 32-bit
+peripheral register read as 8 bits will silently corrupt your driver. This is
+exactly the class of low-level peripheral-driver verification done on the BEL
+UART/GPIO drivers.
+
+\subsection{Arrays are not pointers (but they decay)}
+
+An array name is \textbf{not} a pointer. It is a block of contiguous storage.
+In \emph{most} expressions the array name ``decays'' to a pointer to its first
+element --- but not under \code{sizeof}, not under \code{\&}, and not as a
+string-literal initialiser. Confusing the two is a Tier-1 elimination
+question.
+
+\subsection{Structs, unions, bitfields, padding}
+
+\begin{itemize}
+\item \textbf{struct}: members laid out in order, each at its own offset;
+  total size is often larger than the sum of members because the compiler
+  inserts \emph{padding} to satisfy alignment.
+\item \textbf{union}: all members share the same storage; size is that of the
+  largest member. Used for type-punning and for memory-tight
+  register/overlay tricks.
+\item \textbf{bitfield}: members specified in bits, packed into words --- used
+  for register maps and protocol headers, but with implementation-defined
+  ordering you must know before trusting one on the wire.
+\end{itemize}
+
+These primer pages are the minimum. The depth lives in the Q\&A and the
+Coding Gym below.
+
+%=====================================================================
+\section{Q\&A Bank}
+%=====================================================================
+
+\tierbanner{Tier 1 --- Screening (phone / HR-technical)}%
+{Answer in 2--4 sentences. These are elimination questions: a hesitation here
+ends the call.}
+
+\question{Q1.1}{How big is a pointer?}
+It is the size of an address on the target, not the size of what it points
+to. On a 32-bit MCU every pointer is 4 bytes; on a 64-bit host, 8 bytes. So
+\code{sizeof(char*) == sizeof(double*)} on any given platform.
+
+\question{Q1.2}{What is the difference between \code{*p} in a declaration and
+\code{*p} in an expression?}
+In a declaration, \code{int *p} declares \code{p} as a pointer to int --- the
+\code{*} binds to the type. In an expression, \code{*p} dereferences \code{p}
+to read or write the pointed-to object. Same symbol, two roles.
+
+\question{Q1.3}{What does \code{p++} do when \code{p} is an \code{int*}?}
+It advances \code{p} by \code{sizeof(int)} bytes (4 on most targets), so it
+now points at the next \code{int}, not the next byte. Pointer arithmetic is
+always scaled by the pointed-to type.
+
+\question{Q1.4}{What is a NULL pointer and why use it?}
+\code{NULL} is a pointer value guaranteed not to point at any object. It is
+used as a sentinel --- ``no target yet'' or ``end of list'' --- and
+dereferencing it is undefined behaviour, which on an MCU usually means a fault
+or a bogus read of the vector table at address 0.
+
+\question{Q1.5}{Difference between an array and a pointer in one line?}
+An array is a fixed block of storage; a pointer is a variable holding an
+address. The array name decays to a pointer in most expressions, but
+\code{sizeof} of an array gives the whole block while \code{sizeof} of a
+pointer gives the address size.
+
+\question{Q1.6}{What terminates a C string?}
+A single NUL byte, \code{'\textbackslash{}0'} (value 0). Every standard string
+function relies on it; a buffer without it is not a string and \code{strlen}
+will run off the end.
+
+\question{Q1.7}{Is \code{sizeof} a function or an operator?}
+An operator, evaluated at compile time (for non-VLA types). It yields
+\code{size\_t}. Because it is compile-time,
+\code{sizeof(arr)/sizeof(arr[0])} gives the element count of a real array ---
+but only where the array has not decayed to a pointer.
+
+\question{Q1.8}{Why is a \code{struct} sometimes bigger than the sum of its
+members?}
+Because the compiler inserts padding bytes so each member sits at a properly
+aligned address, and pads the tail so arrays of the struct stay aligned.
+Reordering members largest-to-smallest usually shrinks the struct.
+
+\question{Q1.9}{What is a dangling pointer?}
+A pointer that still holds the address of memory that is no longer valid ---
+a freed heap block, or a local variable whose function has returned.
+Dereferencing it is undefined behaviour; the classic embedded case is
+returning the address of a stack buffer from a function.
+
+\question{Q1.10}{What is a \code{void} pointer?}
+A typeless address used for generic interfaces --- \code{memcpy},
+\code{qsort}, callback context arguments. You cannot dereference it or do
+arithmetic on it in standard C; you must first cast it to a concrete pointer
+type that says how many bytes an access means.
+
+\tierbanner{Tier 2 --- Core technical (panel round)}%
+{Answer in a short paragraph. The panel is checking that you have used these,
+not just read about them.}
+
+\question{Q2.1}{Explain pointer-to-pointer and give a real use.}
+A pointer-to-pointer (\code{int **pp}) holds the address of a pointer. The
+classic use is a function that must modify the caller's pointer --- for
+example an allocator or a linked-list \code{push} that needs to update the
+caller's \code{head}. C passes everything by value, so to change a
+\code{Node*} in the caller you pass its address as \code{Node**}. Another
+everyday use is \code{argv} (\code{char **argv}) and ragged 2D arrays where
+each row is a separately allocated buffer.
+
+\question{Q2.2}{Walk through \code{const} placement: \code{const char *p} vs
+\code{char *const p} vs \code{const char *const p}.}
+Read the declaration right-to-left from the variable name.
+\code{const char *p} --- ``\code{p} is a pointer to char that is const'': you
+can repoint \code{p}, but you cannot write through it (\code{*p = 'x'} is
+illegal). \code{char *const p} --- ``\code{p} is a const pointer to char'':
+you can write \code{*p}, but you cannot repoint \code{p}.
+\code{const char *const p} --- both fixed. In drivers, a read-only register
+view is often \code{volatile const uint32\_t *}, and string-literal
+parameters should be \code{const char *} so the compiler stops you writing
+into read-only memory.
+
+\question{Q2.3}{What is array-to-pointer decay, and where does it NOT happen?}
+In nearly every expression an array name converts to a pointer to its first
+element --- passing to a function, arithmetic, comparison. Decay does
+\textbf{not} happen under \code{sizeof} (you get the full array size), under
+unary \code{\&} (\code{\&arr} has type ``pointer to array'', a different
+type), and for a string literal used to initialise a \code{char[]}. The
+practical trap: pass an array to a function and \code{sizeof} inside the
+function gives the pointer size, so you must pass the length separately.
+
+\question{Q2.4}{How do you declare and use a function pointer? Why does
+embedded code use them?}
+\code{int (*fp)(int, int);} declares \code{fp} as a pointer to a function
+taking two ints and returning int; assign with \code{fp = \&add;} (or just
+\code{add}) and call with \code{fp(2, 3)}. Embedded firmware uses them for
+jump/dispatch tables (command handlers, protocol-message parsers), for
+callback registration (ISR-to-application hooks), and for the interrupt
+vector table itself, which is an array of function pointers. They replace
+long \code{switch} ladders with O(1) dispatch and make state machines
+table-driven.
+
+\question{Q2.5}{Explain a \code{union} and one legitimate embedded use.}
+A union overlays all its members in the same storage, so its size equals the
+largest member and writing one member overwrites the others. Legitimate uses:
+(1) type-punning to inspect the raw bytes of a value --- e.g.\ checking
+endianness or serialising a float into a telemetry packet; (2) saving RAM
+when several mutually-exclusive data shapes are never live at once;
+(3) register overlays where the same word is sometimes read as a whole and
+sometimes as named bitfields. The discipline is that you must track which
+member is currently valid yourself --- the union does not.
+
+\question{Q2.6}{What is structure padding and how do you control it?}
+The compiler aligns each member to its natural boundary (a \code{uint32\_t}
+to a 4-byte address, etc.)\ by inserting padding, and pads the struct tail to
+the largest member's alignment. You control it by ordering members
+largest-to-smallest to minimise gaps, or --- when a struct must match a
+hardware register layout or a wire format exactly --- by packing it
+(\code{\#pragma pack} or \code{\_\_attribute\_\_((packed))}). Packing removes
+padding but can create unaligned members, which on some cores (older ARM)
+faults or is slow, so it is used deliberately, not by default.
+
+\question{Q2.7}{Why must protocol/packet structs be handled carefully across
+machines?}
+Two reasons collide: padding and endianness. A struct mapped onto a received
+byte buffer may have different padding than the sender assumed, and
+multi-byte fields may be byte-swapped if the two ends differ in endianness.
+The robust approach for something like a MIL-STD-1553B or RS422 telemetry
+frame is to parse byte-by-byte (or use a \code{packed} struct \emph{and}
+explicit byte-order conversion), never to blindly cast the raw buffer to a
+normal struct pointer. This is exactly why the BEL packet-parsing automation
+worked at the byte level.
+
+\question{Q2.8}{Why is dynamic memory (\code{malloc}) avoided in flight
+software?}
+Three reasons. \emph{Determinism}: \code{malloc}'s execution time varies with
+heap state, which breaks worst-case timing analysis in a hard real-time loop.
+\emph{Fragmentation}: over a long mission the heap fragments and an
+allocation can fail even with enough total free memory --- and there is
+rarely a sane way to ``handle'' that mid-flight. \emph{Certification}:
+DO-178B-style verification wants memory usage known and bounded at build
+time, so flight code allocates everything statically or from fixed-size
+pools created once at initialisation (MISRA C likewise bans dynamic
+allocation after init). The interview-ready summary: ``allocate at init,
+never in the control loop.''
+
+\question{Q2.9}{How does \code{qsort} use \code{void*} and function pointers
+together?}
+\code{qsort(base, n, size, cmp)} sorts an array of \emph{anything}: it takes
+the array as \code{void*}, the element size, and a comparator function
+pointer \code{int (*cmp)(const void*, const void*)}. Inside the comparator
+you cast both \code{const void*} arguments back to the real element type and
+return negative/zero/positive. This is C's idiom for generic programming ---
+the same pattern appears all over firmware as driver callbacks that receive a
+\code{void *ctx} context pointer, letting one driver serve many clients
+without knowing their types.
+
+\tierbanner{Tier 3 --- Trap \& depth (principal-engineer level)}%
+{A paragraph, plus the trap the question defends against. These decide
+senior-level offers.}
+
+\question{Q3.1}{Is \code{arr[i]} the same as \code{*(arr + i)}? Is
+\code{i[arr]} legal?}
+Yes --- \code{arr[i]} is \emph{defined} as \code{*(arr + i)}. Because
+addition is commutative, \code{*(arr + i) == *(i + arr)}, so \code{i[arr]} is
+legal C and compiles to the same access. \trap interviewers use
+\code{i[arr]} to test whether you understand that subscripting is pure
+pointer arithmetic, not a special array operation. The follow-up trap is that
+this equivalence is why there is no bounds checking in C ---
+\code{arr[i]} will happily compute an out-of-range address, which is the
+origin of buffer-overrun defects.
+
+\question{Q3.2}{What is the difference between \code{char *s = "hi";} and
+\code{char s[] = "hi";}?}
+\code{char s[] = "hi"} copies the 3 bytes (\code{h}, \code{i},
+\code{\textbackslash{}0}) into a writable local array you own --- you may
+modify \code{s[0]}. \code{char *s = "hi"} makes \code{s} point at a string
+\emph{literal}, which lives in read-only storage; writing \code{s[0] = 'H'}
+is undefined behaviour and on an MCU typically faults or is silently dropped
+if the literal is in flash. \trap the second form should really be
+\code{const char *s} and modern compilers warn; candidates who say ``they're
+the same'' fail. Also \code{sizeof(s)} is 3 for the array but the pointer
+size for the pointer.
+
+\question{Q3.3}{Given \code{int a[3][4];}, what are the types of \code{a},
+\code{a[0]}, \code{*a}, \code{\&a}, and how does \code{a+1} differ from
+\code{a[0]+1}?}
+\code{a} has type ``array[3] of array[4] of int''. In an expression it decays
+to \code{int (*)[4]} --- pointer to a row of 4 ints. \code{a[0]} is
+``array[4] of int'', decaying to \code{int*}. \code{*a} is the same as
+\code{a[0]}. \code{\&a} is \code{int (*)[3][4]} --- pointer to the whole 2D
+array. The killer: \code{a + 1} advances by one \emph{row} =
+\code{4*sizeof(int)} = 16 bytes, while \code{a[0] + 1} advances by one
+\emph{int} = 4 bytes. \trap this is how interviewers check you understand
+multidimensional arrays are not arrays of pointers --- they are one
+contiguous block, and the row-pointer type carries the inner dimension. Pass
+such an array as \code{void f(int (*a)[4], int rows)}, never as
+\code{int **}.
+
+\question{Q3.4}{With \code{union \{ float f; uint32\_t u; \} x;}, you set
+\code{x.f} and read \code{x.u} --- legal? What about
+\code{*(uint32\_t*)\&f}?}
+Reading a different union member than the one last written is
+\textbf{type-punning}. In C (since C99, with a footnote) reading through a
+union member is permitted and is the portable, defined way to reinterpret
+bytes --- the right tool for inspecting a float's IEEE-754 bits or
+serialising it. The cast form \code{*(uint32\_t*)\&f} instead violates the
+\textbf{strict-aliasing} rule: the compiler may assume a \code{float*} and a
+\code{uint32\_t*} never refer to the same object, so with optimisation it can
+reorder or elide the access and produce wrong code. \trap many engineers
+reach for the pointer cast; the correct, optimiser-safe answers are the union
+or \code{memcpy}. GCC's strict aliasing (on at \code{-O2}) will bite the cast
+version.
+
+\question{Q3.5}{A struct has a \code{uint8\_t}, then a \code{uint32\_t}, then
+a \code{uint16\_t}. Sketch the layout, give its size, and show how to halve
+the padding.}
+Natural alignment on a 32-bit target: \code{uint8\_t} at offset 0, then
+3 padding bytes, \code{uint32\_t} at offset 4, \code{uint16\_t} at offset 8,
+then 2 tail-padding bytes so the struct size (12) is a multiple of its
+largest alignment (4). Size = 12, of which 5 bytes are padding. Reorder to
+\code{uint32\_t, uint16\_t, uint8\_t}: offsets 0, 4, 6, then 1 tail byte
+$\rightarrow$ size 8, only 1 padding byte. \trap the interviewer wants the
+\emph{tail} padding explained (so arrays of the struct stay aligned) and
+wants you to know reordering --- not packing --- is the first, free fix;
+packing is reserved for wire/register layouts because it can introduce
+unaligned accesses.
+
+\question{Q3.6}{Bitfields: name three things that are implementation-defined,
+and why that disqualifies them from defining a wire protocol.}
+(1) The \emph{allocation order} of bits within a unit (MSB-first vs
+LSB-first) is implementation-defined; (2) whether a bitfield may straddle a
+storage-unit boundary; (3) the signedness of a plain \code{int} bitfield
+(\code{int x:1} may hold values 0 and $-1$). There is also padding between
+bitfields and alignment of the underlying unit. \trap because two compilers
+(or the same compiler on two architectures) can lay the same bitfield struct
+out differently, a bitfield struct cast onto a received CCDL/1553B/RS422
+frame may parse correctly on one build and garble on another. For
+on-the-wire or cross-channel data you extract fields with explicit shifts and
+masks; bitfields are fine only for local, single-compiler register
+convenience.
+
+\question{Q3.7}{Explain \code{restrict} and one place it earns its keep in a
+driver.}
+\code{restrict} on a pointer parameter is a promise to the compiler that, for
+the lifetime of that pointer, the object it points to is accessed \emph{only}
+through that pointer (no aliasing). It lets the optimiser keep values in
+registers instead of reloading after every store. A \code{memcpy}-style
+routine declared
+\code{void copy(uint8\_t *restrict dst, const uint8\_t *restrict src, size\_t n)}
+can be vectorised/unrolled because the compiler knows \code{dst} and
+\code{src} don't overlap. \trap if you pass overlapping buffers to a
+\code{restrict} function the behaviour is undefined --- which is precisely
+why \code{memcpy} is \code{restrict} and \code{memmove} is not. Misusing
+\code{restrict} to silence a warning is a real-world bug source.
+
+\question{Q3.8}{What is a flexible array member, and when would you use one
+for telemetry?}
+C99 lets the \emph{last} member of a struct be an incomplete array:
+\code{struct msg \{ uint16\_t id; uint16\_t len; uint8\_t payload[]; \};}.
+\code{sizeof(struct msg)} excludes the payload; you allocate
+\code{sizeof(struct msg) + len} bytes and the payload sits contiguously after
+the header --- a natural fit for variable-length telemetry or CCDL frames
+where a fixed header announces the payload size. \trap three of them: a
+struct with a flexible array member cannot be an array element or another
+struct's middle member; \code{sizeof} silently excludes the payload (a
+classic buffer-size bug); and the pre-C99 \code{payload[0]} or
+\code{payload[1]} ``struct hack'' is not portable --- say ``flexible array
+member, C99'' and you signal real standard knowledge.
+
+%=====================================================================
+\section{Coding Gym}
+%=====================================================================
+
+\begin{partnote}
+Format for every problem: \textbf{Problem} $\rightarrow$ \textbf{Hints}
+$\rightarrow$ \textsc{attempt before reading on} $\rightarrow$
+\textbf{Solution} with commentary $\rightarrow$ \textbf{Interviewer follow-up
+variants}. Every solution compiles clean under
+\code{gcc -Wall -Wextra -std=c11}.
+\end{partnote}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Swap two integers through pointers}
+
+\textbf{Problem.} Write \code{void swap(int *a, int *b)} that exchanges the
+two values. Then explain why the same thing written as
+\code{void swap(int a, int b)} cannot work.
+
+\textbf{Hints.}
+\begin{itemize}
+\item You need the \emph{addresses} of the caller's variables, not copies.
+\item A temporary is fine; no XOR tricks required (and XOR-swap breaks when
+  both pointers are equal).
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+void swap(int *a, int *b) {   /* a, b hold the addresses of the caller's ints */
+    int tmp = *a;             /* read the value at a into a temporary          */
+    *a = *b;                  /* copy b's value into a's location              */
+    *b = tmp;                 /* copy the saved value into b's location        */
+}
+
+int main(void) {
+    int x = 3, y = 5;
+    swap(&x, &y);             /* pass addresses so swap reaches the originals  */
+    printf("%d %d\n", x, y);  /* prints: 5 3                                   */
+    return 0;
+}
+\end{cgym}
+
+C is pass-by-value: a plain \code{swap(int a, int b)} receives \emph{copies},
+swaps the copies, and the caller's variables are untouched. Passing pointers
+gives the function reach into the caller's storage.
+
+\followups
+\begin{enumerate}
+\item \emph{``Make it generic for any type.''} $\rightarrow$
+  \code{void swap(void *a, void *b, size\_t n)} using a byte loop or
+  \code{memcpy} through a temporary buffer.
+\item \emph{``Why is XOR-swap dangerous?''} $\rightarrow$ If \code{a == b},
+  XOR-swap zeroes the value; it also defeats the optimiser and is no faster
+  on modern cores.
+\item \emph{``What if a caller passes \code{swap(\&x, \&x)}?''} $\rightarrow$
+  The temp-based version is safe (writes the same value back); discuss
+  aliasing.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{\code{my\_strlen} from scratch}
+
+\textbf{Problem.} Implement \code{size\_t my\_strlen(const char *s)} without
+calling library functions.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Walk until the NUL terminator.
+\item \code{const} because you don't modify the string. Return
+  \code{size\_t}.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stddef.h>
+
+size_t my_strlen(const char *s) {
+    const char *p = s;        /* second cursor so we can subtract at the end    */
+    while (*p != '\0') {      /* stop at the NUL terminator                     */
+        p++;                  /* advance one char (chars are 1 byte by defn)    */
+    }
+    return (size_t)(p - s);   /* element distance = number of chars before NUL  */
+}
+\end{cgym}
+
+\code{p - s} is pointer subtraction over \code{char}, so it yields the count
+directly. The cast to \code{size\_t} is because pointer difference is the
+signed \code{ptrdiff\_t}.
+
+\followups
+\begin{enumerate}
+\item \emph{``What if \code{s} is NULL?''} $\rightarrow$ Standard
+  \code{strlen} is UB on NULL; decide a contract (assert, or document
+  non-NULL).
+\item \emph{``Make it count up to a maximum (\code{strnlen}).''}
+  $\rightarrow$ Add \code{size\_t maxlen} and a second loop condition.
+\item \emph{``Where does this go wrong on a non-terminated buffer?''}
+  $\rightarrow$ It reads past the end --- out-of-bounds; tie to why
+  fixed-width fields in a packet are safer than NUL-terminated ones.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{\code{my\_memcpy} and the overlap question}
+
+\textbf{Problem.} Implement
+\code{void *my\_memcpy(void *dst, const void *src, size\_t n)}. Then state
+what happens if the regions overlap and what you'd use instead.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Copy byte by byte through \code{unsigned char *}.
+\item Return \code{dst} to match the standard signature.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stddef.h>
+
+void *my_memcpy(void *dst, const void *src, size_t n) {
+    unsigned char *d = dst;          /* byte cursor into destination          */
+    const unsigned char *s = src;    /* byte cursor into source (read-only)   */
+    while (n-- > 0) {                /* copy exactly n bytes                  */
+        *d++ = *s++;                 /* post-increment both cursors           */
+    }
+    return dst;                      /* standard memcpy returns the dest ptr  */
+}
+\end{cgym}
+
+\code{unsigned char} is the correct lens for raw bytes (well-defined, no
+padding traps). If \code{dst} and \code{src} overlap, this forward copy can
+clobber source bytes before reading them --- that case is \textbf{undefined
+behaviour} for \code{memcpy} and is exactly why \code{memcpy} declares its
+pointers \code{restrict}. Use \code{memmove}, which detects direction and
+copies backward when needed.
+
+\followups
+\begin{enumerate}
+\item \emph{``Write \code{my\_memmove}.''} $\rightarrow$ If \code{d < s} copy
+  forward, else copy from the top down.
+\item \emph{``Speed it up.''} $\rightarrow$ Copy word-at-a-time once both
+  pointers are aligned, byte-tail the remainder; mention \code{restrict}.
+\item \emph{``Why \code{unsigned char} and not \code{char}?''} $\rightarrow$
+  \code{char} signedness is implementation-defined; \code{unsigned char} is
+  the canonical byte type and is exempt from strict aliasing.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Count set bits (population count)}
+
+\textbf{Problem.} Write \code{int popcount(uint32\_t v)} returning the number
+of 1-bits. Give a simple version and a faster one.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Naive: test bit 0, shift right, repeat 32 times.
+\item Faster: \code{v \&= (v - 1)} clears the lowest set bit each iteration
+  $\rightarrow$ loops only as many times as there are set bits.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+
+int popcount(uint32_t v) {
+    int count = 0;
+    while (v != 0u) {        /* Kernighan: loop once per set bit     */
+        v &= (v - 1u);       /* clears the least-significant set bit */
+        count++;
+    }
+    return count;
+}
+\end{cgym}
+
+\code{v - 1} flips the lowest set bit to 0 and sets all lower bits to 1;
+ANDing with \code{v} removes exactly that lowest set bit. So the loop runs
+$k$ times for $k$ set bits, beating the fixed 32-iteration shift version on
+sparse words.
+
+\followups
+\begin{enumerate}
+\item \emph{``Why not just use \code{\_\_builtin\_popcount}?''} $\rightarrow$
+  Fine on a host/GCC; on a bare MCU it may expand to a library call --- know
+  the portable fallback.
+\item \emph{``Count bits in a register status word to detect stuck bits.''}
+  $\rightarrow$ Ties directly to reading a peripheral status/fault register
+  during board bring-up.
+\item \emph{``Parallel / bit-twiddling O(1) version?''} $\rightarrow$ The
+  SWAR mask-and-add sequence; mention it exists, derive only if pushed.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Set / clear / toggle / test a bit (register hygiene)}
+
+\textbf{Problem.} Write the four canonical bit macros ---
+\code{SET\_BIT}, \code{CLEAR\_BIT}, \code{TOGGLE\_BIT}, \code{TEST\_BIT} ---
+and demonstrate them on a 32-bit ``register''. These four lines are the bread
+and butter of every driver you will ever touch.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Build everything from one \code{BIT(n)} mask macro.
+\item Use \code{1u}, not \code{1}: shifting a signed 1 into bit 31 is UB.
+\item Parenthesise every macro argument.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+#define BIT(n)            (1u << (n))
+#define SET_BIT(r, n)     ((r) |=  BIT(n))
+#define CLEAR_BIT(r, n)   ((r) &= ~BIT(n))
+#define TOGGLE_BIT(r, n)  ((r) ^=  BIT(n))
+#define TEST_BIT(r, n)    (((r) >> (n)) & 1u)
+
+int main(void) {
+    uint32_t reg = 0u;
+    SET_BIT(reg, 3);
+    SET_BIT(reg, 7);
+    CLEAR_BIT(reg, 3);
+    TOGGLE_BIT(reg, 0);
+    printf("reg = 0x%08X, bit7 = %u\n", reg, TEST_BIT(reg, 7));
+    /* prints: reg = 0x00000081, bit7 = 1 */
+    return 0;
+}
+\end{cgym}
+
+OR sets without disturbing neighbours; AND with the complement clears; XOR
+flips; shift-and-mask reads. The \code{1u} matters: \code{1 << 31} on a
+32-bit \code{int} is undefined behaviour, \code{1u << 31} is fine.
+
+\followups
+\begin{enumerate}
+\item \emph{``Set bits 4--7 to the value 0b1010 in one expression.''}
+  $\rightarrow$ read-modify-write with a field mask:
+  \code{reg = (reg \& \textasciitilde(0xFu << 4)) | (0xAu << 4);}
+\item \emph{``Why can a read-modify-write on a live hardware register still
+  be wrong?''} $\rightarrow$ An interrupt between the read and the write
+  loses one side's update --- bridge to atomic set/clear registers and
+  critical sections (Part 2 / Chapter 4).
+\item \emph{``Why must \code{r} not have side effects
+  (e.g.\ \code{SET\_BIT(*p++, 3)})?''} $\rightarrow$ The macro expands
+  \code{r} twice; argue for an inline function or single-evaluation
+  discipline.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Reverse a string in place}
+
+\textbf{Problem.} Write \code{void reverse(char *s)} that reverses a
+NUL-terminated string in place.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Two indices/pointers from both ends moving toward the middle.
+\item You need the length first (or a two-pointer walk).
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stddef.h>
+
+static size_t slen(const char *s) {     /* tiny local length helper */
+    const char *p = s;
+    while (*p) p++;
+    return (size_t)(p - s);
+}
+
+void reverse(char *s) {
+    if (s == NULL) return;               /* defensive: nothing to do  */
+    size_t i = 0;
+    size_t j = slen(s);
+    if (j == 0) return;                  /* empty string              */
+    j--;                                 /* j = index of last char    */
+    while (i < j) {                      /* swap ends, walk inward    */
+        char tmp = s[i];
+        s[i] = s[j];
+        s[j] = tmp;
+        i++;
+        j--;
+    }
+}
+\end{cgym}
+
+The guard \code{if (j == 0)} matters: \code{j} is unsigned, so decrementing 0
+would wrap to a huge value and the loop would run off the end --- a classic
+unsigned-underflow defect.
+
+\followups
+\begin{enumerate}
+\item \emph{``Reverse only the words, keeping word order.''} $\rightarrow$
+  Reverse the whole string, then reverse each word --- the classic two-pass
+  trick.
+\item \emph{``Why must \code{s} be writable here?''} $\rightarrow$ A string
+  literal would fault; the argument should come from a \code{char[]}, not
+  \code{char *lit}.
+\item \emph{``Reverse the bytes of a \code{uint32\_t} instead (endian
+  swap).''} $\rightarrow$ Bridges into the endianness topic in Part 2.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{\code{my\_strcmp} --- ordering, not just equality}
+
+\textbf{Problem.} Implement
+\code{int my\_strcmp(const char *a, const char *b)} with the standard
+contract: negative if \code{a < b}, zero if equal, positive if \code{a > b}.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Walk while characters match \emph{and} haven't hit the terminator.
+\item Compare through \code{unsigned char} --- the standard requires it, and
+  it keeps high-bit bytes ordered sensibly.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+int my_strcmp(const char *a, const char *b) {
+    while (*a != '\0' && *a == *b) {    /* advance over the common prefix     */
+        a++;
+        b++;
+    }
+    /* first mismatching (or terminating) bytes decide the order */
+    return (int)(unsigned char)*a - (int)(unsigned char)*b;
+}
+
+int main(void) {
+    printf("%d %d %d\n",
+           my_strcmp("abc", "abc"),       /* 0          */
+           my_strcmp("abc", "abd") < 0,   /* 1 (a < b)  */
+           my_strcmp("b", "a") > 0);      /* 1 (a > b)  */
+    return 0;
+}
+\end{cgym}
+
+The loop needs only \code{*a != '\textbackslash{}0'} because if \code{*a}
+equals \code{*b} and \code{*a} is NUL, both ended together. The
+\code{unsigned char} casts are the part interviewers probe: with plain
+(possibly signed) \code{char}, a byte like \code{0xFF} would compare as
+$-1$ and order before \code{'A'}, breaking sorted tables.
+
+\followups
+\begin{enumerate}
+\item \emph{``Write \code{strncmp}.''} $\rightarrow$ Add a length bound and
+  stop at \code{n} as well.
+\item \emph{``Why is the return contract negative/zero/positive rather than
+  $-1/0/1$?''} $\rightarrow$ The standard only promises sign; never test
+  \code{== -1}.
+\item \emph{``Case-insensitive version?''} $\rightarrow$ \code{tolower} on
+  \code{unsigned char} values --- and note locale pitfalls.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{\code{my\_atoi} --- parsing digits off the wire}
+
+\textbf{Problem.} Implement \code{int my\_atoi(const char *s)}: skip leading
+whitespace, accept an optional sign, convert consecutive digits, stop at the
+first non-digit.
+
+\textbf{Hints.}
+\begin{itemize}
+\item \code{*s - '0'} converts a digit character to its value --- the digits
+  are contiguous in every C character set.
+\item Accumulate in a wider type if you want headroom to discuss overflow.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+int my_atoi(const char *s) {
+    long val = 0;                        /* wider accumulator         */
+    int sign = 1;
+    while (*s == ' ' || *s == '\t') {    /* skip leading whitespace   */
+        s++;
+    }
+    if (*s == '+' || *s == '-') {        /* optional sign             */
+        if (*s == '-') {
+            sign = -1;
+        }
+        s++;
+    }
+    while (*s >= '0' && *s <= '9') {     /* consume digits            */
+        val = val * 10 + (*s - '0');     /* shift-and-add in base 10  */
+        s++;
+    }
+    return (int)(sign * val);
+}
+\end{cgym}
+
+\code{my\_atoi("  -123")} $\rightarrow$ $-123$;
+\code{my\_atoi("+42abc")} $\rightarrow$ 42; \code{my\_atoi("0")}
+$\rightarrow$ 0 (all verified). The honest caveat to volunteer: like the real
+\code{atoi}, this has no overflow protection --- a long digit string
+overflows silently. That admission, plus naming \code{strtol} as the
+overflow-aware replacement, is exactly what a senior interviewer is fishing
+for.
+
+\followups
+\begin{enumerate}
+\item \emph{``Add overflow handling.''} $\rightarrow$ Check
+  \code{val > (INT\_MAX - digit) / 10} before each step, clamp like
+  \code{strtol}.
+\item \emph{``Parse a hex field from a telemetry log line.''} $\rightarrow$
+  Extend with base-16 digits; or shift by 4 per nibble.
+\item \emph{``Why is \code{*s - '0'} guaranteed to work?''} $\rightarrow$ The
+  C standard requires \code{'0'..'9'} contiguous; letters have no such
+  guarantee.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Function-pointer dispatch table (command parser)}
+
+\textbf{Problem.} You receive single-byte commands over UART: \code{'R'}
+read, \code{'W'} write, \code{'S'} status. Replace a \code{switch} with a
+function-pointer dispatch table and explain the win.
+
+\textbf{Hints.}
+\begin{itemize}
+\item An array of \code{\{command, handler\}} pairs.
+\item Each handler shares one signature.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+#include <stddef.h>
+
+typedef int (*handler_fn)(int arg);     /* common handler signature   */
+
+static int do_read(int arg)   { return arg + 1; }  /* stand-ins       */
+static int do_write(int arg)  { return arg - 1; }
+static int do_status(int arg) { return arg * 2; }
+
+typedef struct {
+    char        cmd;          /* the command byte from the wire        */
+    handler_fn  fn;           /* routine that handles it               */
+} command_t;
+
+static const command_t table[] = {      /* the dispatch table          */
+    { 'R', do_read   },
+    { 'W', do_write  },
+    { 'S', do_status },
+};
+
+static handler_fn lookup(char cmd) {
+    for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); i++) {
+        if (table[i].cmd == cmd) {
+            return table[i].fn;          /* found the handler          */
+        }
+    }
+    return NULL;                         /* unknown command            */
+}
+
+int main(void) {
+    char incoming = 'W';
+    handler_fn h = lookup(incoming);
+    if (h != NULL) {
+        printf("result = %d\n", h(10));  /* calls do_write(10) -> 9    */
+    } else {
+        printf("unknown command\n");
+    }
+    return 0;
+}
+\end{cgym}
+
+The win: adding a command is one table row, not another \code{case} plus the
+risk of a missing \code{break}. The dispatch is data-driven, so the same
+engine handles any protocol just by swapping the table --- which is how a
+clean RS422/CAN message parser is structured. The interrupt vector table is
+the same idea baked into hardware: an array of function pointers indexed by
+exception number.
+
+\followups
+\begin{enumerate}
+\item \emph{``What's the danger of an uninitialised function pointer?''}
+  $\rightarrow$ Calling it jumps to garbage $\rightarrow$ hard fault; always
+  init to NULL and check.
+\item \emph{``Make it O(1) instead of O(n).''} $\rightarrow$ Index by the
+  command byte directly into a 256-entry sparse table when the command space
+  is small/dense.
+\item \emph{``Where do function pointers appear in firmware you didn't
+  write?''} $\rightarrow$ ISR vector table, RTOS task entry points, callback
+  registration in driver APIs.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Prove structure padding and shrink it}
+
+\textbf{Problem.} Without running it on the target, predict \code{sizeof} for
+the two structs below on a 32-bit-aligned platform, then write a program that
+prints the sizes and member offsets to confirm.
+
+\begin{cgym}
+struct bad  { uint8_t a; uint32_t b; uint16_t c; };  /* poor order      */
+struct good { uint32_t b; uint16_t c; uint8_t a; };  /* ordered by size */
+\end{cgym}
+
+\textbf{Hints.}
+\begin{itemize}
+\item \code{offsetof} from \code{<stddef.h>} reveals where each member lands.
+\item Tail padding rounds the size up to the largest member's alignment.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+#include <stddef.h>
+#include <stdint.h>
+
+struct bad  { uint8_t a; uint32_t b; uint16_t c; };
+struct good { uint32_t b; uint16_t c; uint8_t a; };
+
+int main(void) {
+    printf("bad : size=%zu  a@%zu b@%zu c@%zu\n",
+           sizeof(struct bad),
+           offsetof(struct bad, a),
+           offsetof(struct bad, b),
+           offsetof(struct bad, c));
+    printf("good: size=%zu  b@%zu c@%zu a@%zu\n",
+           sizeof(struct good),
+           offsetof(struct good, b),
+           offsetof(struct good, c),
+           offsetof(struct good, a));
+    return 0;
+}
+\end{cgym}
+
+Predicted on a typical 32-bit-aligned ABI: \code{bad} $\rightarrow$
+\code{a@0}, 3 pad, \code{b@4}, \code{c@8}, 2 tail pad $\rightarrow$
+\textbf{size 12}. \code{good} $\rightarrow$ \code{b@0}, \code{c@4},
+\code{a@6}, 1 tail pad $\rightarrow$ \textbf{size 8}. Same data, 33\%
+smaller, just by ordering members large-to-small. (Exact numbers are
+ABI-dependent; the program confirms them on whatever you run it on ---
+verified 12/8 on x86-64 GCC.)
+
+\followups
+\begin{enumerate}
+\item \emph{``Now make \code{bad} exactly 7 bytes.''} $\rightarrow$
+  \code{\_\_attribute\_\_((packed))} --- but warn about unaligned access
+  cost/fault on some ARM cores.
+\item \emph{``Why does the tail get padded?''} $\rightarrow$ So
+  \code{struct bad arr[2]} keeps \code{arr[1].b} aligned.
+\item \emph{``How does this interact with sending the struct over RS422?''}
+  $\rightarrow$ Both ends must agree on padding \emph{and} byte order, or you
+  parse field-by-field instead.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Type-pun a float safely (endianness probe warm-up)}
+
+\textbf{Problem.} Print the four raw bytes of \code{float 1.0f} in memory
+order, using a \emph{defined} technique (no strict-aliasing violation).
+
+\textbf{Hints.}
+\begin{itemize}
+\item \code{union} member read, or \code{memcpy} into a byte array --- both
+  are legal.
+\item A \code{*(uint32\_t*)\&f} cast is the trap; avoid it.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+#include <stdint.h>
+#include <string.h>
+
+int main(void) {
+    float f = 1.0f;
+    unsigned char bytes[sizeof f];
+    memcpy(bytes, &f, sizeof f);   /* defined: copies the object bytes */
+    for (size_t i = 0; i < sizeof f; i++) {
+        printf("%02X ", bytes[i]); /* little-endian: 00 00 80 3F       */
+    }
+    printf("\n");
+    return 0;
+}
+\end{cgym}
+
+\code{memcpy} into an \code{unsigned char[]} is the optimiser-safe way to
+view an object's representation --- \code{unsigned char} may alias anything,
+and \code{memcpy} is exempt from strict aliasing. On a little-endian host
+you'll see \code{00 00 80 3F} (IEEE-754 \code{1.0f} = \code{0x3F800000}, low
+byte first). On a big-endian target the order reverses --- which is the
+bridge into the endianness section of Part 2 and into why telemetry floats
+need explicit byte-order handling.
+
+\followups
+\begin{enumerate}
+\item \emph{``Do the same with a \code{union} --- is it as legal?''}
+  $\rightarrow$ Yes in C; show
+  \code{union \{ float f; unsigned char b[4]; \}}.
+\item \emph{``Detect endianness at runtime.''} $\rightarrow$ Pun a
+  \code{uint32\_t = 1} and look at byte 0 (covered in Part 2).
+\item \emph{``Why not \code{(uint32\_t)f}?''} $\rightarrow$ That
+  \emph{converts} the value (truncates to 1), it does not reinterpret the
+  bits --- a favourite trick question.
+\end{enumerate}
+\end{gymproblem}
+
+%=====================================================================
+\section{Link to Her Resume}
+%=====================================================================
+
+\begin{resumelink}
+\textbf{Pointers / drivers:} ``On the BEL UART and GPIO driver verification I
+worked at the register level, so I'm fluent in casting a memory-mapped
+address to a \code{volatile} pointer of the correct width --- getting that
+access width wrong is one of the first low-level driver defects I check
+for.''
+
+\medskip
+\textbf{Structs / packets:} ``When I built the Python suite parsing
+MIL-STD-1553B and RS422 telemetry, I learned the hard way to parse frames
+field-by-field rather than casting a raw buffer onto a struct --- padding and
+endianness differences between the sender and my parser would otherwise
+corrupt the decode. The same byte-level discipline carries into the C side.''
+
+\medskip
+\textbf{Function pointers:} ``A clean message parser for CCDL or CAN traffic
+is a function-pointer dispatch table, not a giant switch --- adding a message
+type becomes one table entry, and it mirrors how the MCU's own interrupt
+vector table works.''
+
+\medskip
+\small These connect Chapter 1 fundamentals to concrete lines already on the
+resume (LPC3250/ARM9 driver work, the 1553B/RS422 Python automation, RS422
+interface routines at TASL). Keep the claims to what the resume states ---
+the deep project scripting happens later, only from \code{inputs/INTAKE.md}.
+\end{resumelink}
+
+%=====================================================================
+\section{Self-Test Scorecard}
+%=====================================================================
+
+\begin{scorecard}
+\begin{enumerate}
+\item On a 32-bit MCU, what is \code{sizeof(double *)}?
+\item \code{int *p; p++;} --- by how many bytes does \code{p} move?
+\item Read aloud: \code{char *const p}. What is fixed, what is free?
+\item Where does array-to-pointer decay \textbf{not} happen? Name two places.
+\item What single byte ends a C string, and what is its value?
+\item \code{arr[i]} is shorthand for what pointer expression? Is
+  \code{i[arr]} legal?
+\item Why is \code{char s[] = "hi"} writable but \code{char *s = "hi"} not
+  safe to write?
+\item Given \code{uint8\_t; uint32\_t; uint16\_t} in a struct, what is the
+  size on a 32-bit ABI, and how do you shrink it?
+\item Reading a union member you didn't last write --- legal in C? What about
+  \code{*(uint32\_t*)\&myfloat}?
+\item Name two reasons a bitfield struct must not define an on-the-wire
+  protocol.
+\end{enumerate}
+\end{scorecard}
+
+\begin{answerkey}
+\begin{enumerate}
+\item 4 bytes --- pointer size follows the target address width, not the
+  pointee.
+\item \code{sizeof(int)} bytes, normally 4.
+\item \code{p} (the pointer) is fixed/const; \code{*p} (the pointed-to char)
+  is writable.
+\item Under \code{sizeof}, under unary \code{\&}, and as a \code{char[]}
+  string-literal initialiser (any two).
+\item The NUL byte \code{'\textbackslash{}0'}, value 0.
+\item \code{*(arr + i)}; yes, \code{i[arr]} is legal because addition
+  commutes.
+\item The array copies the bytes into writable storage you own; the pointer
+  aims at a read-only string literal --- writing it is UB.
+\item 12 bytes (with 5 padding); reorder largest-to-smallest $\rightarrow$
+  8 bytes. Packing is the last resort, for wire/register layouts.
+\item Union member read is legal type-punning in C; the pointer-cast version
+  violates strict aliasing and can be miscompiled at \code{-O2}.
+\item Bit allocation order (MSB/LSB-first) is implementation-defined;
+  signedness of plain-\code{int} bitfields is implementation-defined;
+  straddling storage units and padding are also unspecified --- so the layout
+  isn't portable across compilers/architectures.
+\end{enumerate}
+\end{answerkey}
+
+%=====================================================================
+%=====================================================================
+%                           PART 2
+%=====================================================================
+%=====================================================================
+
+\begin{partnote}
+\textbf{Part 2 of 2} --- \code{volatile} $\rightarrow$ \code{const}
+$\rightarrow$ \code{static} $\rightarrow$ Storage Classes \& Linkage
+$\rightarrow$ Typecasting \& Integer Promotion $\rightarrow$ Preprocessor \&
+Macros vs Inline $\rightarrow$ Endianness. Part 1 covered pointers through
+struct padding; this half covers the keywords and language rules that decide
+whether firmware is correct \emph{and} survives the optimiser.
+\end{partnote}
+
+\code{volatile} is the single most-asked embedded interview keyword, and the
+one most candidates explain incompletely. The rest of Part 2 --- storage
+classes, integer promotion, the preprocessor, endianness --- is where senior
+panels separate ``wrote some C'' from ``understands the abstract machine.''
+
+%=====================================================================
+\section{Primer (Part 2)}
+%=====================================================================
+
+\subsection{\code{volatile} --- ``the compiler must not assume''}
+
+\code{volatile} tells the compiler that an object can change in ways it cannot
+see, so every read must actually load from memory and every write must
+actually store --- no caching in a register, no eliding ``redundant'' reads,
+no reordering relative to other volatile accesses. Three canonical cases:
+(1) a memory-mapped peripheral register (hardware changes it);
+(2) a global written by an ISR and read by the main loop;
+(3) a variable changed by a signal handler. Without \code{volatile}, a
+\code{while (!flag) \{\}} polling loop can be ``optimised'' into an infinite
+loop because the compiler proves \code{flag} never changes \emph{in that
+code}.
+
+\subsection{\code{const} --- a promise, not a lock}
+
+\code{const} means ``this code will not modify the object through this name.''
+It is a compile-time contract that catches accidental writes and documents
+intent (a \code{const} parameter says ``I only read your buffer''). It does
+\emph{not} mean the storage is physically immutable: a \code{const} object
+aliased by a non-const pointer can still change. On embedded targets a
+file-scope \code{const} is often placed in flash/ROM, saving RAM. \code{const}
+and \code{volatile} combine: a read-only status register is
+\code{volatile const} --- it changes on its own (volatile) but your code must
+not write it (const).
+
+\subsection{\code{static} --- two unrelated meanings}
+
+\code{static} does two different things depending on where it appears.
+(1) On a \emph{local} variable: changes its \emph{storage duration} to the
+whole program --- the variable keeps its value between calls and is
+zero-initialised once. (2) On a \emph{file-scope} variable or function:
+changes its \emph{linkage} to internal --- the name is private to its
+translation unit, so other files cannot see it. These two uses share a keyword
+but solve different problems (persistence vs encapsulation).
+
+\subsection{Storage classes \& linkage}
+
+Every C object has a \emph{storage duration} (how long it lives) and a
+\emph{linkage} (which names refer to the same object across files):
+\begin{itemize}
+\item \code{auto} --- the default for locals; automatic duration (lives on the
+  stack for the block), no linkage.
+\item \code{register} --- a hint (now ignored by modern compilers) to keep in
+  a register; you cannot take its address.
+\item \code{static} --- static duration; internal linkage at file scope.
+\item \code{extern} --- declares a name defined elsewhere; external linkage.
+\end{itemize}
+A non-\code{static} global has external linkage and lives for the whole
+program in \code{.data} (if initialised non-zero) or \code{.bss}
+(zero-initialised). This map onto \code{.text/.data/.bss} is Chapter 2.
+
+\subsection{Typecasting \& integer promotion}
+
+C silently converts between arithmetic types, and the rules bite. In any
+arithmetic expression, operands smaller than \code{int} are promoted to
+\code{int} (\emph{integer promotion}); then the two operands are brought to a
+common type (\emph{usual arithmetic conversions}). The dangerous one: mixing
+signed and unsigned of the same width converts the signed value to unsigned,
+so \code{-1} becomes a huge number. Casting is sometimes necessary (narrowing
+a result, reinterpreting via \code{void*}) but each cast is a place a bug
+hides.
+
+\subsection{Preprocessor \& macros vs inline}
+
+The preprocessor does pure text substitution before compilation: \code{\#define}
+constants and function-like macros, \code{\#include}, and conditional
+compilation (\code{\#if}/\code{\#ifdef}). Function-like macros are fast (no
+call overhead, type-generic) but dangerous: they evaluate arguments more than
+once and need defensive parentheses. Modern embedded C prefers \code{static
+inline} functions for anything non-trivial --- same speed after inlining, but
+with type checking and single evaluation. Macros still win for things
+functions cannot do: token pasting (\code{\#\#}), stringisation (\code{\#}),
+\code{container\_of}, and compile-time configuration.
+
+\subsection{Endianness}
+
+Endianness is the order multi-byte values occupy in memory.
+\emph{Little-endian} stores the least-significant byte at the lowest address
+(ARM/x86 default); \emph{big-endian} stores the most-significant byte first
+(``network byte order,'' many avionics buses). It matters the instant bytes
+cross a boundary --- a CCDL/1553B/RS422 frame, a file, a socket --- because
+the two ends may disagree. The fix is explicit byte-order conversion
+(\code{htonl}-style swaps), never a raw cast that silently inherits the local
+order.
+
+%=====================================================================
+\section{Q\&A Bank (Part 2)}
+%=====================================================================
+
+\tierbanner{Tier 1 --- Screening (phone / HR-technical)}%
+{Two to four sentences. \code{volatile}, \code{const}, and \code{static} come
+up on almost every screening call.}
+
+\question{Q1.11}{What does \code{volatile} mean?}
+It tells the compiler the object may change outside the program's visible
+control, so it must read it from memory every time and never optimise the
+access away or reorder it with other volatile accesses. You use it for
+memory-mapped registers, ISR-shared globals, and signal-handler variables.
+
+\question{Q1.12}{Give one bug that \code{volatile} fixes.}
+A flag polled in \code{while (!data\_ready) \{\}} and set inside an interrupt.
+Without \code{volatile} the compiler may load \code{data\_ready} once into a
+register and loop forever; with \code{volatile} it re-reads memory each
+iteration and sees the ISR's update.
+
+\question{Q1.13}{What does \code{const} promise?}
+That the code will not modify the object \emph{through that name}. It is a
+compile-time check and documentation of intent; it does not physically lock
+the memory, though a file-scope \code{const} often ends up in flash/ROM on an
+MCU.
+
+\question{Q1.14}{Name the two meanings of \code{static}.}
+On a local variable it gives static storage duration --- the value persists
+across calls. On a file-scope variable or function it gives internal linkage
+--- the name is private to that source file.
+
+\question{Q1.15}{Macro vs \code{inline} function --- one-line difference?}
+A macro is text substitution with no type checking and can evaluate its
+arguments multiple times; a \code{static inline} function is real code that is
+type-checked and evaluates each argument once, with the same speed after
+inlining.
+
+\question{Q1.16}{What is endianness?}
+The byte order of a multi-byte value in memory. Little-endian puts the
+least-significant byte at the lowest address (ARM/x86); big-endian puts the
+most-significant byte first (network/avionics byte order).
+
+\question{Q1.17}{What is \code{extern} for?}
+It declares that a global is defined in another translation unit, so the
+linker resolves it later. You put \code{extern int x;} in a header and the
+single definition \code{int x;} in exactly one \code{.c} file.
+
+\tierbanner{Tier 2 --- Core technical (panel round)}%
+{A short paragraph. The panel wants the \emph{why}, and the limits.}
+
+\question{Q2.10}{Does \code{volatile} make a variable atomic or thread-safe?}
+No --- a common and serious misconception. \code{volatile} guarantees the
+access happens (no caching, no elision) and is not reordered with other
+volatile accesses, but it does \emph{not} make a read-modify-write atomic and
+provides no synchronisation between cores. \code{flag++} on a volatile is
+still a non-atomic load/increment/store that an interrupt can split. For
+atomicity you need a critical section (disable interrupts), a hardware
+atomic/LDREX-STREX, or C11 \code{\_Atomic}. The interview-perfect answer:
+``\code{volatile} is about \emph{visibility}, not \emph{atomicity}.''
+
+\question{Q2.11}{How do you declare a read-only 32-bit status register at a
+fixed address, and why each qualifier?}
+\begin{cgym}
+#define STATUS (*(volatile const uint32_t *)0x40020010u)
+\end{cgym}
+\code{uint32\_t} sets the 32-bit access width; \code{volatile} because the
+hardware changes it under you, so every read must hit memory; \code{const}
+because firmware must only read it --- writing is a bug the compiler now
+catches; the cast turns the literal address into a typed pointer and the outer
+\code{*} dereferences it so \code{STATUS} reads like a variable.
+
+\question{Q2.12}{Why does \code{static int counter} inside a function behave
+differently from a plain local?}
+A plain local is created on the stack each call and destroyed on return.
+\code{static} moves it to static storage: it is created once, zero-initialised
+before \code{main}, and keeps its value across calls --- useful for a call
+counter or a one-time-init guard. The caveat for embedded: a function with a
+\code{static} local is \emph{not reentrant} and not thread/ISR-safe, because
+all callers share that one object.
+
+\question{Q2.13}{Walk through integer promotion with a real trap.}
+Operands narrower than \code{int} are promoted to \code{int} before
+arithmetic. So with \code{uint8\_t a = 0xFF, b = 0x01;}, the expression
+\code{a + b} is computed as \code{int} (256), not wrapped to 8 bits ---
+assigning back to \code{uint8\_t} is where truncation happens. The nastier
+trap is signed/unsigned: \code{if (someInt < someUnsigned)} converts the
+\code{int} to unsigned, so a negative \code{someInt} becomes huge and the
+comparison flips. Always be deliberate about widths and signedness in
+expressions that drive control flow.
+
+\question{Q2.14}{Why wrap a multi-statement macro in \code{do \{ ... \} while
+(0)}?}
+So the macro behaves like a single statement and survives being used after an
+\code{if} without braces. A bare \code{\{ ... \}} block breaks the trailing
+semicolon (\code{if (x) FOO(); else ...} fails to compile); the
+\code{do\{\}while(0)} idiom swallows the semicolon and keeps one entry/exit.
+It is the standard way to write a function-like macro that contains
+statements.
+
+\question{Q2.15}{When do you still choose a macro over a \code{static inline}
+function?}
+When you need something the language cannot express as a function: token
+pasting (\code{\#\#}) and stringisation (\code{\#}); a type-generic operation
+without C11 \code{\_Generic}; \code{container\_of} (pointer arithmetic on a
+type); header-configured compile-time constants and conditional compilation;
+or guaranteeing compile-time evaluation for array sizes. For ordinary
+``small function'' duties --- \code{MIN}, \code{ABS}, register helpers ---
+prefer \code{static inline} for type safety and single evaluation.
+
+\question{Q2.16}{How do you detect endianness at runtime, and when must you
+care?}
+Store a known multi-byte value and inspect its first byte:
+\code{uint32\_t x = 1;}
+\code{int little = (*(unsigned char*)\&x == 1);}. You care
+whenever bytes leave the CPU --- serialising a telemetry frame, parsing a
+1553B/RS422 packet, reading a binary file written on another machine, or
+talking to a big-endian peripheral. Inside one CPU's own RAM, endianness is
+invisible; at every interface you convert explicitly.
+
+\question{Q2.17}{What is a header include guard and what breaks without it?}
+A guard (\code{\#ifndef FOO\_H / \#define FOO\_H / ... / \#endif}, or
+\code{\#pragma once}) stops a header's contents from being textually inserted
+twice in one translation unit. Without it, including a header that defines a
+struct or typedef through two paths gives ``redefinition'' errors. Guards
+protect against \emph{multiple inclusion in one file}; they do \emph{not}
+replace \code{extern} for sharing one variable across files.
+
+\tierbanner{Tier 3 --- Trap \& depth (principal-engineer level)}%
+{A paragraph plus the trap. These are where \code{volatile}, promotion, and
+linkage myths get tested.}
+
+\question{Q3.9}{Is \code{volatile} enough to share a multi-byte variable
+between an ISR and the main loop? What's actually required?}
+No. \code{volatile} guarantees the main loop re-reads the variable and the
+compiler doesn't reorder volatile accesses, but it gives no \emph{atomicity}.
+On an 8/16-bit core (or for a 64-bit value on a 32-bit core) a multi-byte
+read can be torn: the ISR fires mid-read and you observe half the old value
+and half the new one. The correct pattern is to make the access atomic ---
+brief interrupt disable around the read/write, a lock-free single-writer
+ring buffer, or a hardware atomic --- \emph{and} keep \code{volatile} for
+visibility. \trap candidates say ``just make it volatile.'' The senior answer
+separates \emph{visibility} (volatile) from \emph{atomicity}
+(critical section / atomic) and names tearing as the failure mode --- exactly
+the class of timing/shared-data defect from the BEL HSI work.
+
+\question{Q3.10}{Does \code{volatile} order accesses to \emph{non-volatile}
+memory or across CPU cores? What tool does?}
+No on both counts. The standard only orders volatile accesses with respect to
+\emph{other volatile accesses} in the same thread; the compiler may still
+reorder surrounding non-volatile loads/stores, and \code{volatile} emits no
+CPU memory-barrier instruction, so on a multi-core or weakly-ordered system
+another core can observe writes out of order. Correct ordering needs an
+explicit compiler barrier and/or a hardware barrier (\code{DMB}/\code{DSB} on
+ARM, or C11 atomics with the right memory order). \trap interviewers use this
+to catch people who think \code{volatile} is a concurrency primitive. It is a
+\emph{compiler} directive about a single thread's visible accesses, not a
+\emph{memory model} primitive.
+
+\question{Q3.11}{\code{\#define}, \code{const}, and \code{enum} for a constant
+--- compare all three.}
+\code{\#define MAX 10} is a preprocessor text token: no type, no storage, no
+scope, invisible to the debugger, and it can surprise you in expressions
+(always parenthesise). \code{const int max = 10;} is a typed, scoped object
+the debugger sees and the compiler type-checks; at file scope it may live in
+flash, but in C (unlike C++) it is not a constant expression, so you cannot
+use it as an array size or \code{case} label. \code{enum \{ MAX = 10 \};}
+gives a named, typed (\code{int}) compile-time constant expression with scope
+and no storage --- the best choice for integer constants used as array sizes
+or switch labels. \trap the C-vs-C++ difference on \code{const} as an array
+dimension is the depth probe; ``use \code{enum} for compile-time integer
+constants'' is the embedded idiom.
+
+\question{Q3.12}{What is wrong with \code{if (strlen(s) - 1 >= 0)} and similar
+unsigned arithmetic?}
+\code{strlen} returns \code{size\_t}, which is unsigned, so for an empty
+string \code{strlen(s) - 1} is not $-1$ --- it underflows to \code{SIZE\_MAX},
+and \code{>= 0} is \emph{always true} for an unsigned value, so the guard is
+useless and the following code indexes far out of bounds. The same bug hides
+in \code{for (size\_t i = n - 1; i >= 0; i--)} (never terminates) and in
+buffer-length math like \code{remaining = capacity - used} when \code{used >
+capacity}. \trap the fix is to compare \emph{before} subtracting
+(\code{if (len > 0)}) or to compute in a signed type with known range. This
+unsigned-underflow family is one of the most common real embedded defects and
+a favourite ``find the bug'' question.
+
+\question{Q3.13}{Show a function-like macro bug from double evaluation and fix
+it two ways.}
+\code{\#define MAX(a,b) ((a) > (b) ? (a) : (b))} evaluates the winning
+argument twice, so \code{MAX(i++, j)} increments \code{i} an extra time when
+\code{i} wins, and \code{MAX(read\_adc(), thresh)} samples the ADC twice. Fix
+1 (portable, preferred): a \code{static inline} function ---
+\code{static inline int imax(int a, int b)\{ return a>b?a:b; \}} --- which
+evaluates each argument once and type-checks. Fix 2 (GCC/Clang): a
+statement-expression macro that binds each argument to a local once,
+\code{(\{ \_\_typeof\_\_(a) \_a=(a); \_\_typeof\_\_(b) \_b=(b); \_a>\_b?\_a:\_b; \})}.
+\trap the parentheses are necessary but not sufficient --- correct parens fix
+\emph{precedence}, not \emph{multiple evaluation}; only single-binding fixes
+the side-effect bug. Saying that distinction out loud is the whole point of
+the question.
+
+\question{Q3.14}{Why can a bitfield struct laid over a hardware register or a
+wire frame read correctly on one build and wrong on another --- tie it to
+endianness?}
+Two separate, compounding implementation-defined behaviours.
+\emph{Bitfield allocation order} (whether the first declared field is the
+most- or least-significant bits of the unit) is up to the compiler, so the
+same struct maps to different bits on two toolchains. \emph{Byte endianness}
+then decides the order of the underlying storage unit's bytes in memory.
+Layer them and a bitfield struct cast onto a received frame can disagree with
+the sender on both bit order and byte order. \trap the robust technique is to
+read the raw bytes in a known order and extract fields with explicit shifts
+and masks (and an explicit byte swap if the protocol is big-endian);
+bitfields are acceptable only for local, single-compiler register
+convenience --- never as the definition of an on-the-wire format. This is the
+discipline behind byte-level 1553B/RS422 packet parsing.
+
+%=====================================================================
+\section{Coding Gym (Part 2)}
+%=====================================================================
+
+\begin{partnote}
+Problem numbering continues from Part 1. Same format; every solution compiles
+clean under \code{gcc -Wall -Wextra -std=c11} (the two statement-expression
+macros are noted as GCC/Clang extensions).
+\end{partnote}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Byte-swap 16- and 32-bit values (endianness)}
+
+\textbf{Problem.} Write \code{swap16} and \code{swap32} that reverse byte
+order, then explain where you'd call them in a telemetry path.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Mask each byte, shift it to its mirrored position, OR the pieces.
+\item Use \code{unsigned} types and \code{u} suffixes --- shifting signed
+  values into the sign bit is undefined.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+
+uint16_t swap16(uint16_t v) {
+    return (uint16_t)((v >> 8) | (v << 8));   /* two bytes trade places */
+}
+
+uint32_t swap32(uint32_t v) {
+    return ((v & 0x000000FFu) << 24) |   /* byte 0 -> byte 3 */
+           ((v & 0x0000FF00u) <<  8) |   /* byte 1 -> byte 2 */
+           ((v & 0x00FF0000u) >>  8) |   /* byte 2 -> byte 1 */
+           ((v & 0xFF000000u) >> 24);    /* byte 3 -> byte 0 */
+}
+\end{cgym}
+
+Verified: \code{swap16(0x1234)} $\rightarrow$ \code{0x3412},
+\code{swap32(0x11223344)} $\rightarrow$ \code{0x44332211}. You call these at
+the wire boundary: convert each multi-byte field to/from the protocol's byte
+order (e.g.\ big-endian for many avionics buses) when packing or parsing a
+frame, never on data that stays inside the CPU.
+
+\followups
+\begin{enumerate}
+\item \emph{``Use the compiler builtin instead.''} $\rightarrow$
+  \code{\_\_builtin\_bswap32}; know the portable version for non-GCC targets.
+\item \emph{``Only swap if the host differs from network order.''}
+  $\rightarrow$ Combine with a runtime/compile-time endianness check, like
+  \code{htonl}.
+\item \emph{``Swap a 64-bit value.''} $\rightarrow$ Same pattern, eight terms,
+  or two \code{swap32} on the halves plus a half-swap.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Detect endianness at runtime}
+
+\textbf{Problem.} Return non-zero if the host is little-endian, using a
+\emph{defined} technique.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Put a 1 in a \code{uint32\_t} and look at the lowest-address byte.
+\item \code{unsigned char} aliasing is legal --- no strict-aliasing issue.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+
+int is_little_endian(void) {
+    uint32_t x = 1u;                          /* bytes: 01 00 00 00 (LE) */
+    return *(const unsigned char *)&x == 1u;  /* low byte holds the 1?  */
+}
+\end{cgym}
+
+If the byte at the lowest address is 1, the least-significant byte came first
+--- little-endian. Reading through \code{unsigned char*} is the one
+pointer-cast that is always legal (\code{unsigned char} may alias any object),
+so this does not trip strict aliasing the way \code{*(int*)\&f} would.
+
+\followups
+\begin{enumerate}
+\item \emph{``Do it at compile time.''} $\rightarrow$
+  \code{\_\_BYTE\_ORDER\_\_ == \_\_ORDER\_LITTLE\_ENDIAN\_\_} (GCC/Clang) so
+  the branch folds away.
+\item \emph{``A union version?''} $\rightarrow$
+  \code{union \{ uint32\_t u; unsigned char b[4]; \}} and test \code{b[0]}.
+\item \emph{``Why does this matter for the 1553B parser you wrote?''}
+  $\rightarrow$ Multi-byte fields must be swapped to the bus order before
+  comparing against expected values.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Power-of-two check}
+
+\textbf{Problem.} Write \code{is\_power\_of\_two(uint32\_t v)} returning true
+only for $1, 2, 4, 8, \dots$ (and false for 0).
+
+\textbf{Hints.}
+\begin{itemize}
+\item A power of two has exactly one bit set.
+\item \code{v \& (v - 1)} clears the lowest set bit --- for a single-bit
+  value that yields 0.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+
+int is_power_of_two(uint32_t v) {
+    return (v != 0u) && ((v & (v - 1u)) == 0u);
+}
+\end{cgym}
+
+\code{v - 1} flips the single set bit to 0 and all lower bits to 1; ANDing
+with \code{v} gives 0 exactly when there was only one set bit. The
+\code{v != 0} guard is essential: for \code{v == 0}, \code{v \& (v-1)} is also
+0 but 0 is not a power of two. Verified: \code{64} $\rightarrow$ true,
+\code{48} $\rightarrow$ false.
+
+\followups
+\begin{enumerate}
+\item \emph{``Round up to the next power of two.''} $\rightarrow$ Bit-smear
+  (\code{v|=v>>1; ...; v>>16}) then \code{v+1}; common for sizing ring
+  buffers and DMA regions.
+\item \emph{``Why do power-of-two buffer sizes matter?''} $\rightarrow$ Index
+  masking \code{idx \& (size-1)} replaces a modulo --- the ring-buffer trick
+  in Chapter 13.
+\item \emph{``Alignment check for a pointer?''} $\rightarrow$
+  \code{((uintptr\_t)p \& (align-1)) == 0} with \code{align} a power of two.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Swap the nibbles of a byte}
+
+\textbf{Problem.} Write \code{swap\_nibbles(uint8\_t b)} that exchanges the
+high and low 4 bits.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Shift the low nibble up, the high nibble down, OR them.
+\item Cast back to \code{uint8\_t} to silence the promotion-to-\code{int}
+  width warning.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+
+uint8_t swap_nibbles(uint8_t b) {
+    return (uint8_t)((b << 4) | (b >> 4));
+}
+\end{cgym}
+
+\code{b << 4} promotes \code{b} to \code{int} and moves the low nibble into
+bits 4--7; \code{b >> 4} moves the high nibble into bits 0--3. The outer
+\code{(uint8\_t)} cast both documents intent and prevents a
+\code{-Wconversion}-style narrowing surprise. Verified:
+\code{0x4C} $\rightarrow$ \code{0xC4} (196).
+
+\followups
+\begin{enumerate}
+\item \emph{``Why the cast --- isn't \code{b} already 8-bit?''} $\rightarrow$
+  Integer promotion makes the \emph{expression} an \code{int}; the cast brings
+  it back.
+\item \emph{``Pack two 4-bit readings into one byte.''} $\rightarrow$
+  \code{(hi << 4) | (lo \& 0x0F)} --- the BCD/packed-field pattern.
+\item \emph{``Swap nibbles across a whole buffer.''} $\rightarrow$ Loop with
+  the same op; bridges to in-place buffer transforms.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Reverse the bits of a byte}
+
+\textbf{Problem.} Write \code{reverse\_bits8(uint8\_t b)} so bit 0 becomes bit
+7, etc.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Shift the result left, OR in the LSB of the input, shift the input
+  right --- eight times.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+
+uint8_t reverse_bits8(uint8_t b) {
+    uint8_t r = 0;
+    for (int i = 0; i < 8; i++) {
+        r = (uint8_t)((r << 1) | (b & 1u));  /* pull LSB of b into LSB of r */
+        b = (uint8_t)(b >> 1);               /* expose the next bit of b    */
+    }
+    return r;
+}
+\end{cgym}
+
+Each iteration shifts \code{r} up to make room and drops in \code{b}'s current
+least-significant bit; after 8 steps the order is fully mirrored. Verified:
+\code{0x01} $\rightarrow$ \code{0x80} (128). Bit reversal shows up in CRC and
+some SPI/LSB-first peripheral formats.
+
+\followups
+\begin{enumerate}
+\item \emph{``Make it branch-free / O(1).''} $\rightarrow$ The mask-and-swap
+  sequence (swap adjacent bits, then pairs, then nibbles); mention it exists.
+\item \emph{``Where does LSB-first bit order actually occur?''} $\rightarrow$
+  Some UART/SPI peripherals and CRC definitions; tie to reading a datasheet
+  carefully.
+\item \emph{``Reverse a 32-bit word.''} $\rightarrow$ Same loop, 32 iterations,
+  or table-driven per byte.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{A side-effect-safe \code{MAX} macro (and why)}
+
+\textbf{Problem.} Show the classic broken \code{MAX} macro, demonstrate the
+double-evaluation bug, then give a correct macro \emph{and} a correct inline
+function.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Parentheses fix precedence, not multiple evaluation.
+\item GCC/Clang statement expressions let you bind each argument once.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+#define MAX_BAD(a, b)  ((a) > (b) ? (a) : (b))   /* evaluates winner twice */
+
+/* GCC/Clang extension: statement expression binds each arg exactly once */
+#define MAX_SAFE(a, b)            \
+    ({ __typeof__(a) _a = (a);    \
+       __typeof__(b) _b = (b);    \
+       _a > _b ? _a : _b; })
+
+/* Portable, type-checked alternative */
+static inline int imax(int a, int b) {
+    return a > b ? a : b;
+}
+
+int main(void) {
+    int i = 5, j = 10;
+    int bad = MAX_BAD(i++, j);   /* i would be incremented twice if it won */
+    printf("bad=%d i=%d\n", bad, i);   /* here i wins via 'else', so i==6  */
+
+    int a = 5, b = 10;
+    int safe = MAX_SAFE(a++, b);
+    printf("safe=%d a=%d\n", safe, a); /* a evaluated once: a==6           */
+    printf("inline=%d\n", imax(3, 9));
+    return 0;
+}
+\end{cgym}
+
+The bug surfaces when the chosen argument has a side effect: with
+\code{MAX\_BAD(read\_adc(), thresh)} the ADC is sampled twice and the two reads
+can differ. \code{MAX\_SAFE} binds each argument to a local exactly once;
+\code{imax} avoids the problem entirely with real parameters and adds type
+checking --- the reason production embedded code prefers \code{static inline}
+for anything beyond trivial token tricks.
+
+\followups
+\begin{enumerate}
+\item \emph{``Why is \code{imax} limited?''} $\rightarrow$ It's \code{int}-only;
+  a macro/statement-expr or C11 \code{\_Generic} is needed for type-generic
+  \code{MAX}.
+\item \emph{``Wrap a multi-statement macro safely.''} $\rightarrow$
+  \code{do \{ ... \} while (0)} so it acts as one statement after a braceless
+  \code{if}.
+\item \emph{``Show the parenthesis bug separately.''} $\rightarrow$
+  \code{\#define SQ(x) x*x} then \code{SQ(a+1)} expands to \code{a+1*a+1};
+  parens fix that, not the double-eval.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{\code{container\_of} --- from member back to struct}
+
+\textbf{Problem.} Implement the Linux-kernel \code{container\_of} macro:
+given a pointer to a struct \emph{member}, recover a pointer to the enclosing
+struct. Explain where firmware uses it.
+
+\textbf{Hints.}
+\begin{itemize}
+\item \code{offsetof(type, member)} gives the member's byte offset.
+\item Subtract that offset from the member pointer, cast to \code{type*}.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+#include <stddef.h>
+
+#define container_of(ptr, type, member) \
+    ((type *)((char *)(ptr) - offsetof(type, member)))
+
+typedef struct {
+    int   id;
+    float voltage;      /* a callback hands us &reading.voltage ... */
+} reading_t;
+
+int main(void) {
+    reading_t r = { 7, 3.3f };
+    float *vp = &r.voltage;                       /* ...only this pointer  */
+    reading_t *back = container_of(vp, reading_t, voltage);
+    printf("%d %.1f\n", back->id, (double)back->voltage);  /* 7 3.3 */
+    return 0;
+}
+\end{cgym}
+
+Cast to \code{char*} so the subtraction is in bytes, back off by the member's
+offset, and reinterpret as the parent type. This is how intrusive linked
+lists and generic callback frameworks recover their owning object from a
+pointer to an embedded node/field --- the backbone of RTOS and driver data
+structures that must avoid dynamic allocation.
+
+\followups
+\begin{enumerate}
+\item \emph{``What breaks if \code{member} is wrong?''} $\rightarrow$ You get
+  a misaligned/garbage parent pointer --- undefined behaviour; the macro
+  trusts you.
+\item \emph{``Why \code{char*} and not \code{type*} for the subtraction?''}
+  $\rightarrow$ Pointer arithmetic must be in bytes here; \code{type*} would
+  scale by \code{sizeof(type)}.
+\item \emph{``Show an intrusive linked-list node use.''} $\rightarrow$ Embed a
+  \code{list\_node} in the struct and recover the struct in the iterator ---
+  Chapter 9/13.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Persistent state with \code{static} (and its reentrancy
+cost)}
+
+\textbf{Problem.} Write \code{next\_id()} that returns 1, 2, 3, \dots\ on
+successive calls using a \code{static} local, and a file-private global
+exposed only through an accessor. Then state the embedded caveat.
+
+\textbf{Hints.}
+\begin{itemize}
+\item \code{static} local: created once, persists across calls.
+\item \code{static} at file scope: internal linkage, invisible to other
+  \code{.c} files.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+int next_id(void) {
+    static int counter = 0;   /* one shared instance, persists across calls */
+    return ++counter;
+}
+
+static int module_private = 42;   /* internal linkage: this file only */
+
+int get_private(void) {
+    return module_private;
+}
+
+int main(void) {
+    int a = next_id();        /* sequential calls -> deterministic order */
+    int b = next_id();
+    int c = next_id();
+    printf("%d %d %d %d\n", a, b, c, get_private());   /* 1 2 3 42 */
+    return 0;
+}
+\end{cgym}
+
+The \code{static} local gives persistence without a global; the file-scope
+\code{static} gives encapsulation. \textbf{Caveat:} because all callers share
+that one \code{counter}, \code{next\_id} is \emph{not reentrant} --- if an ISR
+and the main loop both call it, the \code{++counter} read-modify-write can be
+torn and IDs duplicated. Make such state atomic (disable interrupts around the
+increment) or pass per-caller state explicitly when reentrancy is required.
+
+\followups
+\begin{enumerate}
+\item \emph{``Make \code{next\_id} ISR-safe.''} $\rightarrow$ Critical section
+  around the increment, or a hardware atomic add.
+\item \emph{``Why is a \code{static} local zero-initialised even though you
+  didn't write 0?''} $\rightarrow$ Static-duration objects default to zero,
+  in \code{.bss} --- Chapter 2.
+\item \emph{``Difference between \code{static} on a local vs on this global?''}
+  $\rightarrow$ Local: storage duration. Global: linkage. Same keyword, two
+  jobs.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{A \code{const}-correct checksum over a buffer}
+
+\textbf{Problem.} Write \code{checksum} that sums the bytes of a buffer it
+promises not to modify, with a signature that lets callers pass
+\code{const} data.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Take \code{const unsigned char *} --- read-only view, byte-accurate.
+\item A non-const parameter would reject a \code{const} buffer at the call
+  site.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+unsigned long checksum(const unsigned char *data, unsigned long n) {
+    unsigned long sum = 0;
+    for (unsigned long i = 0; i < n; i++) {
+        sum += data[i];          /* read-only access; compiler enforces it */
+    }
+    return sum;
+}
+
+int main(void) {
+    const unsigned char buf[] = { 0x10, 0x20, 0x30 };
+    printf("%lu\n", checksum(buf, sizeof buf));   /* 96 */
+    return 0;
+}
+\end{cgym}
+
+The \code{const} on the parameter is a contract the compiler enforces: any
+accidental \code{data[i] = ...} fails to compile, and callers may pass
+\code{const} (flash-resident) buffers. This is exactly how a packet-integrity
+or CRC helper should be declared in a protocol parser --- the input frame is
+read, never written.
+
+\followups
+\begin{enumerate}
+\item \emph{``Upgrade to a real CRC-8/16.''} $\rightarrow$ Replace the sum
+  with a polynomial update --- the CRC problem in Chapter 13.
+\item \emph{``What does \code{const} buy beyond catching typos?''}
+  $\rightarrow$ Documentation, flash placement of the data, and optimiser
+  freedom (no aliasing writes).
+\item \emph{``Why \code{unsigned char} for the buffer?''} $\rightarrow$
+  Byte-accurate, no signedness/aliasing surprises --- the canonical raw-byte
+  type.
+\end{enumerate}
+\end{gymproblem}
+
+%=====================================================================
+\section{Link to Her Resume (Part 2)}
+%=====================================================================
+
+\begin{resumelink}
+\textbf{volatile / shared data:} ``The timing defects I resolved during BEL
+HSI testing were exactly the \code{volatile}-vs-atomic class --- a value
+shared between an interrupt and the main loop needs \code{volatile} for
+visibility \emph{and} a critical section for atomicity. Treating
+\code{volatile} as if it were thread-safe is one of the first things I check
+in a review.''
+
+\medskip
+\textbf{const / register access:} ``A read-only status register is
+\code{volatile const} --- it changes on its own but firmware must never write
+it. Getting those qualifiers right on the LPC3250 peripheral drivers was part
+of the low-level verification work.''
+
+\medskip
+\textbf{Endianness / packet parsing:} ``When I parsed MIL-STD-1553B and RS422
+telemetry in Python, byte order was a real concern --- I converted multi-byte
+fields to the bus order explicitly rather than trusting the host layout, and I
+carry the same byte-level discipline into the C side instead of casting a raw
+buffer onto a bitfield struct.''
+
+\medskip
+\small Each line maps to a concrete resume claim (BEL HSI timing-defect work,
+LPC3250 driver verification, the 1553B/RS422 Python automation). Keep to what
+the resume states; the deep, defensible project scripting happens in
+Chapter 15 --- and only from \code{inputs/INTAKE.md}.
+\end{resumelink}
+
+%=====================================================================
+\section{Self-Test Scorecard (Part 2)}
+%=====================================================================
+
+\begin{scorecard}
+\begin{enumerate}
+\item In one sentence, what does \code{volatile} guarantee --- and what does
+  it \emph{not} guarantee?
+\item Why can a \code{while (!flag) \{\}} loop hang without \code{volatile}?
+\item Declare a read-only 32-bit hardware status register at \code{0x40020010}
+  with the correct qualifiers.
+\item What are the two unrelated meanings of \code{static}?
+\item \code{uint8\_t a = 0xFF, b = 1;} --- what type and value is \code{a + b}
+  before assignment?
+\item Why is \code{if (strlen(s) - 1 >= 0)} always true?
+\item Why does \code{MAX(i++, j)} misbehave, and what are two fixes?
+\item Why wrap a multi-statement macro in \code{do \{ \} while (0)}?
+\item Write the runtime little-endian check in one line.
+\item Compare \code{\#define}, \code{const}, and \code{enum} for an integer
+  constant used as an array size.
+\end{enumerate}
+\end{scorecard}
+
+\begin{answerkey}
+\begin{enumerate}
+\item It guarantees every access actually hits memory and isn't reordered
+  with other volatile accesses (visibility); it does \emph{not} guarantee
+  atomicity or thread/ISR safety.
+\item The compiler may cache \code{flag} in a register, never re-reading the
+  memory the ISR updates, so the loop condition never changes.
+\item \code{\#define STATUS (*(volatile const uint32\_t *)0x40020010u)} ---
+  \code{volatile} (hardware-changed), \code{const} (read-only),
+  \code{uint32\_t} (32-bit width).
+\item On a local: static storage duration (persists across calls). At file
+  scope: internal linkage (private to the translation unit).
+\item \code{int}, value 256 --- operands promote to \code{int}; truncation
+  happens only on assignment back to \code{uint8\_t}.
+\item \code{strlen} returns unsigned \code{size\_t}; for an empty string the
+  subtraction underflows to \code{SIZE\_MAX}, and any unsigned value is
+  \code{>= 0}.
+\item It evaluates the winning argument twice (extra increment / double ADC
+  read). Fixes: a \code{static inline} function, or a statement-expression
+  macro that binds each argument once.
+\item So it expands to a single statement and survives a braceless \code{if
+  ... else}, while still allowing the trailing semicolon.
+\item \code{int le = (*(unsigned char*)\&(uint32\_t)\{1\} == 1);} or, clearer,
+  set \code{uint32\_t x=1;} then test \code{*(unsigned char*)\&x == 1}.
+\item \code{\#define}: untyped text, no scope, debugger-invisible.
+  \code{const int}: typed/scoped but in C \emph{not} a constant expression, so
+  it cannot size an array. \code{enum}: typed compile-time constant with scope
+  and no storage --- the right choice for an array size.
+\end{enumerate}
+\end{answerkey}
+
+\begin{partnote}
+\emph{End of Chapter 1 (Parts 1 \& 2).} Next chapter: \textbf{Memory \&
+Toolchain} --- the memory map, stack vs heap, \code{.text/.data/.bss}, linker
+scripts, and startup code (where the \code{static} zero-initialisation and
+\code{const}-in-flash claims above are actually realised).
+\end{partnote}

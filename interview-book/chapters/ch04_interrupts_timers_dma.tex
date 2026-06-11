@@ -1,0 +1,1202 @@
+% chapters/ch04_interrupts_timers_dma.tex — Chapter 4: Interrupts, Timers & DMA
+% Scope (PLAN.md): ISR rules (what's forbidden inside, why short), latency &
+% jitter, nesting & priority, shared-data problem & solutions, race conditions,
+% timer/PWM frequency-duty math (worked numericals), watchdog design,
+% DMA vs polling vs interrupt tradeoffs.
+% Budget 40 pp, mix 22 Q&A / 14 code / 4 concept.
+% 13 host snippets verified gcc -Wall -Wextra -std=c11 (zero warnings); one
+% // target-only ISR skeleton syntax-checked against device-register stubs.
+
+\chapter{Interrupts, Timers \& DMA}
+\label{ch:interrupts-timers-dma}
+
+\begin{partnote}
+\textbf{Scope} --- ISR rules (what's forbidden, why short) $\rightarrow$
+latency \& jitter $\rightarrow$ nesting \& priority $\rightarrow$ the
+shared-data problem and its solutions $\rightarrow$ race conditions
+$\rightarrow$ timer/PWM frequency--duty arithmetic (worked) $\rightarrow$
+watchdog design $\rightarrow$ DMA vs polling vs interrupt. This chapter turns
+the Chapter 3 NVIC/SysTick/timer hardware into correct, deterministic
+real-time behaviour --- and it is where most embedded bugs actually live.
+\end{partnote}
+
+Interrupts are where ``it works on the bench'' meets ``it fails once an hour in
+the field.'' Every question here is really one question: \emph{how do you share
+state and time between asynchronous contexts without losing data, missing a
+deadline, or corrupting a variable?} That is the daily reality of flight-control
+firmware and exactly the class of HSI timing defect on the resume.
+
+%=====================================================================
+\section{Primer}
+%=====================================================================
+
+\subsection{What an ISR may and may not do}
+
+An interrupt service routine runs in handler mode, asynchronously, often at the
+worst possible moment for the code it interrupts. The rules follow from that:
+keep it \textbf{short} (it stole the CPU from the main flow and may be blocking
+lower-priority interrupts); do \textbf{no blocking} (no busy-wait on another
+peripheral, no \code{malloc}, no long loops); do the minimum --- clear the
+interrupt flag, grab the data, set a flag or push to a queue --- and defer the
+heavy work to the main loop or a task. Calling non-reentrant library functions
+(\code{printf}, the C heap, anything with hidden \code{static} state) from an
+ISR is a classic corruption source. The mental model: an ISR \emph{captures and
+hands off}; it does not \emph{process}.
+
+\subsection{Latency, jitter, and priority}
+
+\textbf{Interrupt latency} is the time from the hardware event to the first
+useful instruction of your handler: NVIC entry (a fixed ~12 cycles on
+Cortex-M, with tail-chaining/late-arrival from Chapter 3), plus any time spent
+\emph{masked} by a higher-priority handler or a critical section.
+\textbf{Jitter} is the variation in that latency from one occurrence to the
+next --- and for a control loop, jitter is often worse than latency, because a
+control law assumes a fixed sample period. The two levers are
+\textbf{priority} (urgent sources get lower priority numbers so they pre-empt)
+and \textbf{discipline} (short ISRs and short critical sections, so nothing
+delays a pre-emption). Nesting lets a high-priority interrupt pre-empt a
+low-priority handler; designing the priority map \emph{is} the real-time design.
+
+\subsection{The shared-data problem}
+
+The defining hazard: a variable touched by both an ISR and the main loop (or by
+two interrupts). A non-atomic read-modify-write (\code{counter++}), a torn
+multi-byte access, or a flag set out of order with the data it guards all
+produce intermittent, hard-to-reproduce bugs. The toolkit, weakest to
+strongest: \code{volatile} for \emph{visibility} (necessary, never sufficient);
+a single-writer lock-free structure (the SPSC ring buffer) so neither side
+needs a lock; an atomic single-word write (\code{BSRR}, bit-band, C11
+\code{\_Atomic}); or a \textbf{critical section} (briefly mask interrupts) for a
+true read-modify-write. The art is choosing the lightest tool that closes the
+race --- a ring buffer for streaming data, a critical section for a shared
+counter, a barrier-ordered flag for a handoff.
+
+\subsection{Timers, PWM, and watchdogs}
+
+A hardware timer is a counter clocked from the tree (Chapter 3): a
+\textbf{prescaler} (\code{PSC}) divides the clock, an \textbf{auto-reload}
+(\code{ARR}) sets the period, and a \textbf{compare} (\code{CCR}) sets a PWM
+duty cycle. The arithmetic is exact and gets asked numerically:
+\[
+f_{\text{update}}=\frac{f_{\text{tim}}}{(\text{PSC}+1)(\text{ARR}+1)},\qquad
+\text{duty}=\frac{\text{CCR}}{\text{ARR}+1}.
+\]
+A \textbf{watchdog} is a timer you must periodically ``kick'' or it resets the
+MCU --- the last line of defence against a hung firmware. An independent
+watchdog (IWDG) runs from its own low-speed clock so it fires even if the main
+clock dies; a window watchdog (WWDG) also faults if you kick \emph{too early},
+catching a runaway loop. Kicking it from a low-priority context (not a timer
+ISR that would fire even if the main loop is hung) is the design subtlety.
+
+%=====================================================================
+\section{Q\&A Bank}
+%=====================================================================
+
+\tierbanner{Tier 1 --- Screening (phone / HR-technical)}%
+{Two to four sentences. Interrupt fundamentals --- the gateway to any embedded
+role.}
+
+\question{Q1.1}{What is an interrupt and why use one instead of polling?}
+An interrupt is a hardware signal that diverts the CPU to a handler when an
+event occurs, so the processor doesn't spin waiting. It saves power and CPU
+time and gives bounded response to asynchronous events --- a byte arriving, a
+timer expiring --- versus polling, which wastes cycles and can miss fast
+events.
+
+\question{Q1.2}{What is the cardinal rule for an ISR?}
+Keep it short and non-blocking: clear the flag, grab the data, signal the main
+loop, and return. Long work, busy-waits, \code{malloc}, and non-reentrant
+calls (like \code{printf}) don't belong in an ISR --- they inflate latency for
+every other interrupt and risk corruption.
+
+\question{Q1.3}{What does \code{volatile} do for an ISR-shared variable, and
+what does it not do?}
+It forces the compiler to actually read/write the variable each time
+(visibility), so the main loop sees the ISR's updates. It does \emph{not}
+provide atomicity or ordering --- a \code{counter++} is still a tearable
+read-modify-write. (Chapters 1 and 3.)
+
+\question{Q1.4}{What is interrupt latency?}
+The delay from the triggering event to the first useful instruction of the
+handler --- hardware entry time plus any time the interrupt is masked by a
+higher-priority handler or a critical section. Lower is better; \emph{bounded}
+is essential for real-time.
+
+\question{Q1.5}{What is jitter and why does it matter for control?}
+Jitter is the cycle-to-cycle variation in latency or sample timing. A control
+loop (a PID) assumes a fixed period; jitter makes the effective sample time
+wander, degrading stability and accuracy --- so for control, low jitter often
+matters more than low average latency.
+
+\question{Q1.6}{What is a watchdog timer?}
+A timer that resets the MCU unless the firmware periodically refreshes
+(``kicks'') it. It recovers a hung or runaway system automatically --- the last
+line of defence when software stops making progress.
+
+\question{Q1.7}{Timer prescaler vs auto-reload --- what does each set?}
+The prescaler divides the input clock to set the counter's tick rate; the
+auto-reload sets how many ticks make one period (and thus the update/overflow
+frequency). Together they give
+$f = f_{\text{tim}} / ((\text{PSC}+1)(\text{ARR}+1))$.
+
+\question{Q1.8}{What is PWM and what sets the duty cycle?}
+Pulse-width modulation produces a square wave of fixed frequency whose
+high-time fraction (duty) encodes a value --- motor speed, LED brightness,
+servo position. The compare register (\code{CCR}) relative to the reload
+(\code{ARR}) sets the duty: $\text{duty}=\text{CCR}/(\text{ARR}+1)$.
+
+\question{Q1.9}{Polling vs interrupt vs DMA in one line each?}
+Polling: CPU repeatedly checks a flag (simple, wasteful). Interrupt: hardware
+notifies the CPU per event (responsive, but per-event overhead). DMA: a
+dedicated engine moves data without the CPU, interrupting only when a whole
+block is done (best for high-throughput streams).
+
+\question{Q1.10}{Why must you clear the interrupt flag inside the handler?}
+Because most peripheral interrupts stay asserted until acknowledged; if you
+don't clear the source flag, the handler re-fires immediately and the CPU is
+stuck in an interrupt storm. Clearing it (and reading any required register) is
+the handshake that says ``serviced.''
+
+\tierbanner{Tier 2 --- Core technical (panel round)}%
+{A short paragraph. The panel wants the mechanisms and the trade-offs.}
+
+\question{Q2.1}{How do you safely share a counter between an ISR and the main
+loop?}
+For a simple counter the main loop reads while the ISR increments. The
+increment \code{counter++} is a read-modify-write, so if the \emph{main loop}
+also writes it, wrap that access in a short critical section (mask interrupts,
+update, restore \code{PRIMASK}). If only the ISR writes and the main loop only
+reads, you mainly need \code{volatile} plus an atomic read of a multi-byte
+value --- e.g.\ the double-read-until-stable pattern (Coding Gym) on a core
+without a 32-bit atomic load. The general rule: identify the single writer if
+you can, because single-writer designs often need no lock at all.
+
+\question{Q2.2}{Why is a lock-free SPSC ring buffer the canonical ISR-to-main
+hand-off?}
+Because with one producer (the ISR) writing only \code{head} and one consumer
+(the main loop) writing only \code{tail}, neither side modifies the other's
+index, so no lock is needed --- the ISR never blocks, which is exactly what an
+ISR must not do. The producer writes the data \emph{then} advances \code{head}
+(publish-after-write); the consumer reads \code{tail}'s slot then advances
+\code{tail}. A power-of-two size lets the wrap be a cheap mask. It streams UART
+or sensor bytes out of the ISR with bounded, deterministic cost.
+
+\question{Q2.3}{What exactly is a race condition here, and name three fixes.}
+A race is when correctness depends on the \emph{timing} of two contexts
+touching shared state --- e.g.\ the main loop reads a 32-bit timestamp while the
+ISR is mid-update, getting half-old/half-new bytes (a torn read), or both do
+\code{x++} and one increment is lost. Fixes: (1) a \textbf{critical section}
+(disable interrupts around the access); (2) an \textbf{atomic} operation
+(single-word write, bit-band, \code{\_Atomic}, or LDREX/STREX); (3) a
+\textbf{lock-free single-writer} structure that removes the shared
+read-modify-write entirely. Choose the lightest that closes the specific race.
+
+\question{Q2.4}{Walk the timer math: 84\,MHz timer clock, you want a 1\,kHz
+interrupt --- give \code{PSC} and \code{ARR}.}
+$f = f_{\text{tim}}/((\text{PSC}+1)(\text{ARR}+1))$. Pick \code{PSC}=83 to
+divide 84\,MHz to 1\,MHz, then \code{ARR}=999 gives
+$1\,\text{MHz}/1000 = 1\,\text{kHz}$. You split into prescaler + reload because
+a single 16-bit reload can't span from a fast clock to a slow period; the
+prescaler coarsely reduces the clock and the reload finely sets the period.
+For a 50\% PWM you'd then set \code{CCR}=500.
+
+\question{Q2.5}{IWDG vs WWDG --- when do you choose each?}
+The \textbf{independent watchdog} runs from its own low-speed RC clock,
+independent of the main clock, so it still fires if the PLL or main clock fails
+--- the robust ``did the firmware die?'' guard, kicked on a coarse period. The
+\textbf{window watchdog} must be kicked within a \emph{window} (not too late
+\emph{and} not too early), so it also catches a runaway loop that kicks too
+fast --- tighter supervision for code whose timing you want to police. Many
+designs use IWDG for gross hangs; WWDG when the control loop's period itself
+must be policed.
+
+\question{Q2.6}{Where should you kick the watchdog, and why not from a timer
+ISR?}
+From a low-priority context that only runs when the system is genuinely making
+progress --- typically the main loop after it has confirmed the critical tasks
+ran this cycle. Kicking from a standalone timer ISR is a trap: that ISR keeps
+firing even if the main loop is hung, so the watchdog is satisfied while the
+application is dead --- defeating its purpose. A good pattern has each critical
+task set a ``I ran'' flag and the kicker refresh the watchdog only when all
+flags are set, then clears them.
+
+\question{Q2.7}{DMA vs interrupt-per-byte for a 1\,Mbit/s UART stream ---
+quantify why DMA wins.}
+At 1\,Mbit/s a byte arrives roughly every 10\,$\mu$s. Interrupt-per-byte means
+an interrupt entry/exit (tens of cycles) plus handler work every 10\,$\mu$s ---
+on a slower core that's a large, jittery CPU tax and risks overrun if a
+higher-priority ISR delays you. DMA moves each byte to a buffer with \emph{zero}
+CPU involvement and interrupts only when the buffer (or half) is full ---
+turning thousands of interrupts per second into a handful. The cost is setup
+complexity and cache/coherency care; the win is CPU headroom and far lower
+jitter for the rest of the system.
+
+\question{Q2.8}{What is a half-transfer interrupt and why use a circular DMA
+buffer?}
+In circular (continuous) DMA the engine wraps to the buffer start
+automatically, and it can interrupt at \emph{half} and \emph{full} transfer.
+This gives ping-pong processing: while the CPU processes the first half, DMA
+fills the second, then they swap --- continuous streaming with no gaps and no
+per-byte interrupts. You compute how many new bytes arrived from the DMA's
+remaining-count register (\code{NDTR}): position $=$ size $-$ \code{NDTR}, and
+new bytes $=$ (position $-$ last) mod size (Coding Gym). It's the standard way
+to receive an unknown-length serial frame.
+
+\question{Q2.9}{How do you handle a 16-bit timer that wraps when measuring an
+interval?}
+Use unsigned modular arithmetic: \code{delta = (uint16\_t)(now - prev)}. Because
+unsigned subtraction wraps modulo $2^{16}$, the difference is correct even
+across one overflow (e.g.\ \code{prev}=0xFFF0, \code{now}=0x0010 gives 0x20=32).
+This works as long as the true interval is less than the timer's full range; for
+longer intervals you extend the timer in software by counting overflows in the
+update ISR. \trap-adjacent: never compute the delta as a signed comparison ---
+that breaks exactly at the wrap.
+
+\question{Q2.10}{What is priority inversion at the interrupt level, and how does
+it differ from the RTOS version?}
+At the NVIC level, a long-running low-priority handler (or an over-long
+critical section that masks interrupts) delays a high-priority interrupt that's
+ready to run --- the urgent work waits behind the unimportant. It's prevented by
+keeping ISRs and critical sections short and by correct priority assignment, not
+by a protocol. The RTOS version (Chapter 9) is subtler: a medium task starves a
+low task that holds a mutex the high task needs, fixed by priority inheritance.
+Same symptom (urgent work blocked by less-urgent), different mechanism and fix.
+
+\question{Q2.11}{Why prefer deferring work to a ``bottom half'' / task over
+doing it in the ISR?}
+Because the ISR runs at interrupt priority, blocking everything below it; long
+processing there inflates latency and jitter system-wide. The ``top half'' (ISR)
+does the time-critical minimum --- timestamp, read the hardware register before
+it's overwritten, enqueue --- and a ``bottom half'' (main loop or a task) does
+the parsing/maths at lower priority where it can be pre-empted. This keeps
+interrupt latency tight and makes the heavy work schedulable, which is the basis
+of responsive real-time design.
+
+\tierbanner{Tier 3 --- Trap \& depth (principal-engineer level)}%
+{A paragraph plus the trap. These are the bugs that cost field returns.}
+
+\question{Q3.1}{An ISR sets \code{data} then sets \code{ready=1}; the main loop
+sees \code{ready==1} but reads stale \code{data}. What happened and how do you
+fix it without a lock?}
+The compiler or the memory system reordered the two stores (or the reader's two
+loads), so \code{ready} became visible before \code{data}. \code{volatile}
+prevents caching but, by itself, does not guarantee ordering between the two
+accesses on a core with a write buffer or weak ordering. The lock-free fix is a
+\textbf{barrier} between them: producer writes \code{data}, issues a \code{DMB}
+(or release-store), then writes \code{ready}; consumer reads \code{ready},
+issues a \code{DMB}, then reads \code{data} (acquire). \trap the junior answer
+``add volatile'' is already true and doesn't fix \emph{ordering}; the senior
+answer separates visibility from ordering and names the barrier or
+acquire/release semantics. This is precisely the HSI timing-defect family from
+the resume.
+
+\question{Q3.2}{Your control loop occasionally jitters by tens of
+microseconds despite a hardware timer trigger. Where do you hunt?}
+A timer fires deterministically, so the jitter is in the \emph{response}, not
+the trigger: (1) the loop's interrupt is being delayed by a higher-or-equal
+priority handler or a long critical section elsewhere (interrupt-level priority
+inversion); (2) the handler itself has data-dependent execution time (a branch,
+a variable-length loop, a cache effect on an ARM9); (3) flash wait-states or a
+shared bus contended by DMA. The method: raise the control ISR's priority,
+shrink every critical section, make the handler's path constant-time, and
+measure with a GPIO toggle on a scope (the \code{DWT} cycle counter for
+software). \trap the trap is blaming the timer; the timer is the one thing
+that's exact. Jitter is a \emph{scheduling/contention} problem in everything
+\emph{around} the handler --- exactly what an avionics 1\,kHz loop must
+guarantee.
+
+\question{Q3.3}{Is \code{counter++} in the main loop safe if only an ISR also
+increments it? Prove your answer.}
+No. \code{counter++} compiles to load, add, store. If the ISR fires between the
+main loop's load and store, the ISR's increment is on the old value and is
+overwritten by the main loop's store --- one count is lost (a lost-update
+race). It's intermittent because it needs the interrupt to land in that
+two-instruction window. The fix is to make the main-loop increment atomic
+w.r.t.\ interrupts (critical section, or an atomic add). \trap candidates say
+``it's just one variable, it's fine''; the depth is recognising that
+\emph{atomicity is about the operation, not the variable's size} --- even a
+single \code{int} increment is three steps. (If the main loop only \emph{reads},
+the concern shrinks to a torn read of a wide value.)
+
+\question{Q3.4}{You enabled a peripheral interrupt but the handler never runs
+--- or runs once and hangs. Enumerate the likely causes.}
+Never runs: the NVIC enable bit isn't set (peripheral interrupt enabled but not
+the NVIC line), the priority is masked by \code{BASEPRI}/\code{PRIMASK}, the
+vector table entry/name is wrong (handler not actually linked at that slot), or
+the peripheral's own interrupt-enable bit is clear. Runs once then hangs: the
+handler didn't clear the source flag, so the interrupt re-asserts forever (an
+interrupt storm), or it re-enabled then immediately re-triggered. \trap the
+two-level enable (peripheral \emph{and} NVIC) and the flag-clear handshake are
+the most common bring-up mistakes; the disciplined check is peripheral-enable
+$\rightarrow$ NVIC-enable $\rightarrow$ priority $\rightarrow$ vector name
+$\rightarrow$ flag-clear in the handler.
+
+\question{Q3.5}{Designing a watchdog strategy for a flight controller: what
+makes it actually safe rather than theatre?}
+It must detect real loss of progress, not merely ``something is still running.''
+Safe design: kick from the lowest-priority context only after every critical
+task has signalled completion this cycle (per-task ``I ran'' flags), so a hung
+or starved task prevents the kick; use the independent watchdog (own clock) so a
+clock failure still resets; size the timeout to the worst-case cycle plus
+margin, not a guess; and on reset, record \emph{why} (watchdog vs power-on) so
+the failure is diagnosable, and bring the system up in a safe state. \trap the
+``theatre'' version kicks the watchdog from a timer ISR or unconditionally at
+the top of the loop --- it then resets only on a total crash, missing the
+common case of one task hung while the tick keeps running. Tying the kick to
+\emph{evidence of progress} is the whole point.
+
+\question{Q3.6}{When is DMA the wrong choice, or a source of subtle bugs?}
+DMA is wrong when latency-per-event matters more than throughput (you still need
+an interrupt to act on each item), when transfers are tiny (setup cost exceeds
+the saving), or when the data must be transformed on the fly (DMA just moves
+bytes). Subtle bugs: the CPU reading a DMA buffer while the engine is still
+writing it (need half/full-transfer synchronisation or barriers); cache
+coherency on cores with a data cache (the CPU sees stale cached data unless the
+region is non-cacheable or invalidated); buffer alignment requirements; and
+forgetting that \code{volatile} doesn't make the CPU\,/\,DMA view coherent.
+\trap the trap is treating DMA as ``free and automatic''; it is a second bus
+master, and every shared buffer between it and the CPU is a concurrency problem
+with the same ordering/atomicity discipline as ISR-shared data.
+
+%=====================================================================
+\section{Coding Gym}
+%=====================================================================
+
+\begin{partnote}
+These are the real interrupt-era patterns. Problems 1--13 are host-compilable
+(verified under \code{gcc -Wall -Wextra -std=c11}); problem 14 is
+\code{// target-only} (a device-register ISR skeleton), syntax-validated against
+register stubs. The ring buffer (problem 1) is the single most-asked embedded
+coding question.
+\end{partnote}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Lock-free SPSC ring buffer (ISR $\rightarrow$ main)}
+
+\textbf{Problem.} Implement a single-producer/single-consumer ring buffer so an
+ISR can push bytes and the main loop can pop them, with no lock.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Producer writes only \code{head}; consumer writes only \code{tail}.
+\item Power-of-two size $\rightarrow$ wrap with a mask. Full when advancing
+  \code{head} would meet \code{tail}.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdbool.h>
+#include <stdio.h>
+
+#define RB_SIZE 8u                  /* power of two */
+typedef struct {
+    uint8_t buf[RB_SIZE];
+    volatile uint32_t head;         /* producer (ISR) writes this  */
+    volatile uint32_t tail;         /* consumer (main) writes this */
+} ring_t;
+
+static bool rb_push(ring_t *r, uint8_t v) {           /* producer */
+    uint32_t next = (r->head + 1u) & (RB_SIZE - 1u);
+    if (next == r->tail) return false;                /* full -> drop */
+    r->buf[r->head] = v;
+    r->head = next;                                   /* publish AFTER the write */
+    return true;
+}
+static bool rb_pop(ring_t *r, uint8_t *v) {           /* consumer */
+    if (r->head == r->tail) return false;             /* empty */
+    *v = r->buf[r->tail];
+    r->tail = (r->tail + 1u) & (RB_SIZE - 1u);
+    return true;
+}
+
+int main(void) {
+    ring_t r = {{0}, 0, 0};
+    rb_push(&r, 10); rb_push(&r, 20); rb_push(&r, 30);
+    uint8_t v; int sum = 0;
+    while (rb_pop(&r, &v)) sum += v;
+    printf("sum=%d empty=%d\n", sum, rb_pop(&r, &v) == false);  /* sum=60 empty=1 */
+    return 0;
+}
+\end{cgym}
+
+The lock-free guarantee comes from \emph{single-writer-per-index}: the ISR only
+advances \code{head}, the main loop only advances \code{tail}, so they never
+modify the same variable and need no mutex --- critical because an ISR must
+never block. \code{head} is advanced \emph{after} the data store so the consumer
+never sees a slot before it's written (on a weakly-ordered core add a release
+barrier there). One slot is left empty to distinguish full from empty.
+
+\followups
+\begin{enumerate}
+\item \emph{``Why leave one slot empty?''} $\rightarrow$ So \code{head==tail}
+  unambiguously means empty; full is ``next would equal tail.'' (Alternative:
+  a separate count, but that's a shared RMW.)
+\item \emph{``Make it byte-stream a UART RX ISR.''} $\rightarrow$ ISR calls
+  \code{rb\_push} with the data register; main loop drains it.
+\item \emph{``What changes on a multi-core / weak-memory system?''}
+  $\rightarrow$ Need acquire/release barriers (or C11 atomics) on
+  \code{head}/\code{tail}, not just \code{volatile}.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Ping-pong double buffer for DMA}
+
+\textbf{Problem.} Maintain two buffers so the DMA fills one while the CPU
+processes the other, then swap.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Keep an \code{active} (DMA target) and a \code{processing} pointer; swap
+  on the transfer-complete event.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+#define BUF_N 4
+static uint8_t  bufA[BUF_N], bufB[BUF_N];
+static uint8_t *active = bufA, *processing = bufB;
+
+static void swap_buffers(void) {              /* call on transfer-complete */
+    uint8_t *t = active; active = processing; processing = t;
+}
+
+int main(void) {
+    for (int i = 0; i < BUF_N; i++) active[i] = (uint8_t)(i + 1);  /* DMA fills */
+    swap_buffers();                                                /* now process */
+    int sum = 0;
+    for (int i = 0; i < BUF_N; i++) sum += processing[i];
+    printf("sum=%d distinct=%d\n", sum, active != processing);     /* sum=10 distinct=1 */
+    return 0;
+}
+\end{cgym}
+
+While the DMA writes \code{active}, the CPU touches only \code{processing}, so
+there is never a buffer both written by DMA and read by the CPU at once --- the
+double-buffer removes the coherency race that a single shared buffer creates.
+The swap is the only synchronised moment, done in the transfer-complete ISR. The
+hardware version of this is circular DMA with half/full-transfer interrupts
+(next problem's relative).
+
+\followups
+\begin{enumerate}
+\item \emph{``How does circular DMA do this with one buffer?''} $\rightarrow$
+  Half/full-transfer interrupts split one buffer into two halves --- same idea.
+\item \emph{``Cache coherency concern?''} $\rightarrow$ On a cached core,
+  invalidate the buffer before the CPU reads DMA-written data.
+\item \emph{``What if processing outlasts the next fill?''} $\rightarrow$
+  Overrun --- you need flow control or a third buffer/queue.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{PWM compare value for a duty cycle}
+
+\textbf{Problem.} Given the auto-reload \code{ARR} and a desired duty percent,
+compute the compare register \code{CCR}.
+
+\textbf{Hints.}
+\begin{itemize}
+\item $\text{CCR} = (\text{ARR}+1)\times\text{duty}/100$.
+\item Use a 64-bit intermediate to avoid overflow.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint32_t pwm_ccr(uint32_t arr, uint32_t duty_pct) {
+    return (uint32_t)(((uint64_t)(arr + 1u) * duty_pct) / 100u);
+}
+
+int main(void) {
+    printf("ccr=%u\n", pwm_ccr(999u, 25u));   /* 25% of 1000 -> 250 */
+    return 0;
+}
+\end{cgym}
+
+The period spans \code{ARR+1} counts, so 25\% duty is \code{CCR}=250: the output
+is high for counts 0--249 and low for 250--999. Duty resolution is therefore
+\code{1/(ARR+1)} --- a larger \code{ARR} gives finer duty steps but (at fixed
+timer clock) a lower PWM frequency, the fundamental resolution-vs-frequency
+trade for motor and servo drive.
+
+\followups
+\begin{enumerate}
+\item \emph{``Servo: 1.5\,ms pulse in a 20\,ms frame --- find \code{CCR}.''}
+  $\rightarrow$ duty = 1.5/20 = 7.5\%; \code{CCR} = 0.075$\times$(ARR+1).
+\item \emph{``Why not floating point on an MCU without an FPU?''}
+  $\rightarrow$ Software FP is slow; integer scaling with a 64-bit temp keeps
+  it exact and fast.
+\item \emph{``Update duty without glitching.''} $\rightarrow$ Use the timer's
+  preload (shadow) register so \code{CCR} changes at the update event.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{PWM frequency from the clock tree}
+
+\textbf{Problem.} Compute the PWM/update frequency from the timer clock,
+prescaler, and reload.
+
+\textbf{Hints.}
+\begin{itemize}
+\item $f = f_{\text{tim}}/((\text{PSC}+1)(\text{ARR}+1))$.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint32_t pwm_freq(uint32_t tim_clk, uint32_t psc, uint32_t arr) {
+    return tim_clk / ((psc + 1u) * (arr + 1u));
+}
+
+int main(void) {
+    printf("freq=%u\n", pwm_freq(84000000u, 0u, 999u));   /* 84 kHz */
+    return 0;
+}
+\end{cgym}
+
+With \code{PSC}=0 the counter runs at the full 84\,MHz and \code{ARR}=999 gives
+84\,MHz/1000 = 84\,kHz. Note the resolution: 1000 steps means ~10-bit duty
+control at 84\,kHz. Want 20-bit-ish resolution at audio rates? Increase
+\code{ARR} (lower frequency) --- you cannot have both maximum frequency and
+maximum resolution from one timer clock.
+
+\followups
+\begin{enumerate}
+\item \emph{``Get exactly 50\,Hz for a servo from 84\,MHz.''} $\rightarrow$
+  \code{PSC}=83 $\rightarrow$ 1\,MHz, \code{ARR}=19999 $\rightarrow$ 50\,Hz.
+\item \emph{``Why might the real frequency differ slightly?''} $\rightarrow$
+  Integer division truncation; pick \code{PSC}/\code{ARR} that divide evenly.
+\item \emph{``Where does the timer clock's $\times2$ APB rule bite?''}
+  $\rightarrow$ If the APB prescaler $\neq1$, \code{tim\_clk} is twice the APB
+  clock.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Switch debounce by sample integration}
+
+\textbf{Problem.} In a periodic tick, sample a bouncing input and only declare a
+stable state after several consecutive equal samples.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Shift each sample into a history byte; \code{0xFF} = stable high,
+  \code{0x00} = stable low.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+/* call once per tick; 'stable' updates only after 8 consecutive equal samples */
+static uint8_t debounce(uint8_t history, int raw, int *stable) {
+    history = (uint8_t)((history << 1) | (raw ? 1u : 0u));
+    if (history == 0xFFu)      *stable = 1;
+    else if (history == 0x00u) *stable = 0;
+    return history;
+}
+
+int main(void) {
+    uint8_t h = 0; int st = 0;
+    int samples[] = {1,0,1,1,1,1,1,1,1,1};   /* bounces, then settles high */
+    for (size_t i = 0; i < sizeof samples/sizeof samples[0]; i++)
+        h = debounce(h, samples[i], &st);
+    printf("stable=%d\n", st);                /* 1 */
+    return 0;
+}
+\end{cgym}
+
+Sampling on a fixed timer tick (every few ms) and requiring 8 agreeing samples
+rejects contact bounce without blocking delays --- far better than a
+\code{delay\_ms()} in an ISR or a polling spin. The number of bits sets the
+debounce time: 8 samples at a 1\,ms tick is an 8\,ms filter. This is the
+interrupt-friendly, non-blocking way to read every mechanical switch.
+
+\followups
+\begin{enumerate}
+\item \emph{``Detect the press edge, not the level.''} $\rightarrow$ Fire when
+  \code{history} transitions \code{0x7F}$\rightarrow$\code{0xFF} (just became
+  stable high).
+\item \emph{``Tune the debounce time.''} $\rightarrow$ Change the tick period or
+  the number of bits required.
+\item \emph{``Why not an RC + Schmitt instead?''} $\rightarrow$ Hardware
+  debounce works but costs parts; software integration is free and
+  adjustable.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Tear-free read of an ISR-updated 32-bit counter}
+
+\textbf{Problem.} On a core without an atomic 32-bit load, read a counter that
+an ISR increments, guaranteeing you never observe a half-updated value.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Read twice; if the two reads disagree, an update happened mid-read --- try
+  again.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static volatile uint32_t isr_ticks = 0;
+
+static uint32_t read_ticks(void) {
+    uint32_t a, b;
+    do {
+        a = isr_ticks;
+        b = isr_ticks;
+    } while (a != b);     /* re-read until two agree -> no tear */
+    return a;
+}
+
+int main(void) {
+    isr_ticks = 0x12345678u;
+    printf("ticks=0x%08X\n", read_ticks());
+    return 0;
+}
+\end{cgym}
+
+On an 8/16-bit core a 32-bit load is several instructions, so an interrupt
+between them can yield a torn value (high half new, low half old). Reading until
+two consecutive reads agree guarantees no update occurred across the pair. The
+alternative is a brief critical section around the read; the double-read avoids
+masking interrupts at all, which is preferable when the read is frequent. (On a
+32-bit core a single aligned 32-bit load is already atomic --- know your target.)
+
+\followups
+\begin{enumerate}
+\item \emph{``When is this unnecessary?''} $\rightarrow$ When the value is
+  $\le$ the core's atomic word size and naturally aligned.
+\item \emph{``A 64-bit timestamp on a 32-bit core?''} $\rightarrow$ Same
+  double-read, or read high/low/high and retry if high changed.
+\item \emph{``Compare to a critical section.''} $\rightarrow$ Critical section
+  adds latency to every interrupt; double-read only costs the reader.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Software countdown timers driven by the tick}
+
+\textbf{Problem.} Provide several software timers that the system tick
+decrements, so the app can poll for expiry without more hardware timers.
+
+\textbf{Hints.}
+\begin{itemize}
+\item An array of counters; the tick ISR decrements the non-zero ones; expiry
+  is ``reached zero.''
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdbool.h>
+#include <stdio.h>
+
+#define NTIMERS 4
+static uint32_t timers[NTIMERS];
+
+static void tick_timers(void) {                 /* from the SysTick ISR */
+    for (int i = 0; i < NTIMERS; i++)
+        if (timers[i]) timers[i]--;
+}
+static void timer_set(int i, uint32_t ticks) { timers[i] = ticks; }
+static bool timer_expired(int i) { return timers[i] == 0u; }
+
+int main(void) {
+    timer_set(0, 3); timer_set(1, 5);
+    for (int t = 0; t < 3; t++) tick_timers();
+    printf("t0=%d t1=%d\n", timer_expired(0), timer_expired(1));   /* 1 0 */
+    return 0;
+}
+\end{cgym}
+
+One hardware tick fans out into many cheap software timeouts --- the basis of
+``do X in 50\,ms'' scheduling without dedicating a peripheral timer to each. The
+ISR work is trivial (a short decrement loop), keeping it within the
+short-ISR rule, and the app polls expiry at its leisure. Watch the shared-access
+caveat: \code{timer\_set} from the main loop while the ISR decrements is a write
+race on a 32-bit value --- atomic on a 32-bit core, otherwise wrap in a
+critical section.
+
+\followups
+\begin{enumerate}
+\item \emph{``Auto-reload (periodic) timers.''} $\rightarrow$ On expiry, reload
+  from a stored period instead of stopping.
+\item \emph{``Run a callback on expiry.''} $\rightarrow$ Store a function
+  pointer per timer; the main loop calls it when expired (not the ISR).
+\item \emph{``Scale to hundreds of timers.''} $\rightarrow$ A sorted
+  delta-queue / timer wheel instead of scanning every tick.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Interval measurement across a 16-bit timer wrap}
+
+\textbf{Problem.} Compute elapsed ticks between two readings of a 16-bit
+free-running timer that may have wrapped once.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Unsigned subtraction is modular --- just cast the difference back to
+  16-bit.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint16_t elapsed(uint16_t now, uint16_t prev) {
+    return (uint16_t)(now - prev);    /* modulo-2^16 handles the wrap */
+}
+
+int main(void) {
+    printf("delta=%u\n", elapsed(0x0010u, 0xFFF0u));   /* wrapped: 0x20 = 32 */
+    return 0;
+}
+\end{cgym}
+
+Because unsigned arithmetic wraps modulo $2^{16}$, \code{now - prev} is the
+correct elapsed count even when \code{now < prev} due to a single overflow ---
+no branch, no special case. The only requirement is that the true interval be
+less than the timer's full span ($2^{16}$ ticks); longer intervals need a
+software-extended timer that counts overflows in the update ISR. Never use a
+signed comparison here --- it fails precisely at the wrap.
+
+\followups
+\begin{enumerate}
+\item \emph{``Extend to intervals longer than 65535 ticks.''} $\rightarrow$
+  Count overflows in the update ISR to form a 32-bit time base.
+\item \emph{``Why is \code{(uint16\_t)} cast needed?''} $\rightarrow$ Integer
+  promotion makes \code{now-prev} an \code{int}; the cast re-wraps it to 16
+  bits.
+\item \emph{``Measure a pulse width with input capture.''} $\rightarrow$ The
+  timer latches the count on the edge; subtract two captures the same way.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Independent-watchdog timeout calculation}
+
+\textbf{Problem.} Compute the IWDG timeout in milliseconds from its low-speed
+clock, prescaler, and reload value.
+
+\textbf{Hints.}
+\begin{itemize}
+\item $t = \text{prescaler}\times(\text{reload}+1)/f_{\text{LSI}}$.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint32_t iwdg_timeout_ms(uint32_t lsi_hz, uint32_t presc, uint32_t reload) {
+    return (uint32_t)((uint64_t)presc * (reload + 1u) * 1000u / lsi_hz);
+}
+
+int main(void) {
+    printf("timeout=%u ms\n", iwdg_timeout_ms(32000u, 32u, 1249u));   /* 1250 ms */
+    return 0;
+}
+\end{cgym}
+
+A 32\,kHz LSI, prescaler 32, reload 1249 gives
+$32\times1250/32000 = 1.25\,\text{s}$. You size the timeout to the worst-case
+loop period plus margin: too short and a legitimate slow cycle resets you; too
+long and a hang goes undetected for ages. The LSI's own tolerance (it's an RC
+oscillator) means you leave generous margin rather than cutting it fine.
+
+\followups
+\begin{enumerate}
+\item \emph{``Pick values for a 4\,s timeout.''} $\rightarrow$ Solve
+  \code{presc*(reload+1) = 4*lsi}; e.g.\ presc=128, reload=999.
+\item \emph{``Why account for LSI tolerance?''} $\rightarrow$ The RC clock
+  varies several percent with temperature/voltage; margin prevents spurious
+  resets.
+\item \emph{``Where do you kick it?''} $\rightarrow$ Low-priority context, only
+  after confirming progress (Q2.6/Q3.5).
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Interrupt response-time budget}
+
+\textbf{Problem.} Given the NVIC entry cycles and the handler's worst-case
+cycles, compute the response time in nanoseconds at a given core clock.
+
+\textbf{Hints.}
+\begin{itemize}
+\item $t = (\text{entry}+\text{work})/f_{\text{cpu}}$; use a 64-bit
+  intermediate and report ns.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint32_t response_ns(uint32_t entry_cyc, uint32_t work_cyc, uint32_t cpu_hz) {
+    return (uint32_t)((uint64_t)(entry_cyc + work_cyc) * 1000000000u / cpu_hz);
+}
+
+int main(void) {
+    printf("resp=%u ns\n", response_ns(12u, 100u, 168000000u));   /* ~666 ns */
+    return 0;
+}
+\end{cgym}
+
+12 cycles of NVIC entry plus a 100-cycle handler at 168\,MHz is ~666\,ns ---
+\emph{if} nothing masks the interrupt. The real worst case adds the longest time
+the interrupt can be blocked: a higher-priority handler's duration, or the
+longest critical section anywhere in the system. That ``blocking term'' is
+usually the dominant and most overlooked part of the budget, which is why short
+critical sections matter so much.
+
+\followups
+\begin{enumerate}
+\item \emph{``Add a 2\,$\mu$s critical section elsewhere --- new worst case?''}
+  $\rightarrow$ Add 2000\,ns; it likely dwarfs the entry+work term.
+\item \emph{``How do you measure entry cycles for real?''} $\rightarrow$
+  Toggle a GPIO at the event and at handler entry; read on a scope, or use
+  \code{DWT->CYCCNT}.
+\item \emph{``Why is average latency misleading?''} $\rightarrow$ Real-time
+  cares about the worst case, not the mean --- one missed deadline is a
+  failure.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Peak-to-peak jitter from a timestamp series}
+
+\textbf{Problem.} Given measured inter-arrival intervals, compute the
+peak-to-peak jitter.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Jitter = max interval $-$ min interval.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stddef.h>
+#include <stdio.h>
+
+static uint32_t jitter(const uint32_t *intervals, size_t n) {
+    uint32_t mn = intervals[0], mx = intervals[0];
+    for (size_t i = 1; i < n; i++) {
+        if (intervals[i] < mn) mn = intervals[i];
+        if (intervals[i] > mx) mx = intervals[i];
+    }
+    return mx - mn;     /* peak-to-peak */
+}
+
+int main(void) {
+    uint32_t iv[] = {1000, 1002, 998, 1001, 999};
+    printf("jitter=%u\n", jitter(iv, sizeof iv/sizeof iv[0]));   /* 4 */
+    return 0;
+}
+\end{cgym}
+
+A nominal 1000-tick period that ranges 998--1002 has 4 ticks of peak-to-peak
+jitter. For a control loop you quote jitter as a fraction of the period (here
+0.4\%) and check it against the loop's tolerance. You'd collect these intervals
+on-target from an input-capture timer or the cycle counter, then watch how
+jitter grows when DMA or higher-priority ISRs contend --- the empirical version
+of Q3.2.
+
+\followups
+\begin{enumerate}
+\item \emph{``Report RMS jitter instead of peak-to-peak.''} $\rightarrow$
+  Standard deviation of the intervals; peak-to-peak is the safety-critical
+  bound.
+\item \emph{``Where do you capture these timestamps cheaply?''} $\rightarrow$
+  Timer input-capture on the event edge, or \code{DWT->CYCCNT} in software.
+\item \emph{``A single huge outlier --- mean hides it, what catches it?''}
+  $\rightarrow$ Max / peak-to-peak; always track the worst case.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Rate-limited action (do every N ticks)}
+
+\textbf{Problem.} Run an action only every \code{N} calls --- e.g.\ a slow task
+driven from a fast tick.
+
+\textbf{Hints.}
+\begin{itemize}
+\item A counter that fires and resets at \code{N}.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdbool.h>
+#include <stdio.h>
+
+static bool every_n(uint32_t *counter, uint32_t n) {
+    if (++(*counter) >= n) { *counter = 0; return true; }   /* fire & reset */
+    return false;
+}
+
+int main(void) {
+    uint32_t c = 0; int fires = 0;
+    for (int i = 0; i < 10; i++) if (every_n(&c, 3)) fires++;
+    printf("fires=%d\n", fires);   /* fires at 3,6,9 -> 3 */
+    return 0;
+}
+\end{cgym}
+
+This builds a slow software clock from a fast one --- run a 1\,kHz tick but
+execute a 100\,Hz task by firing every 10th tick, or blink an LED every 500\,ms
+from a 1\,ms tick. It keeps all timing referenced to one hardware tick (so tasks
+stay phase-coherent) instead of spreading timing across many peripherals. Each
+task gets its own counter and divisor.
+
+\followups
+\begin{enumerate}
+\item \emph{``Stagger two tasks so they don't run on the same tick.''}
+  $\rightarrow$ Give them different initial counter offsets (phase).
+\item \emph{``Why keep one tick source?''} $\rightarrow$ Phase coherence and a
+  single time base simplify reasoning and reduce drift.
+\item \emph{``Drift over time?''} $\rightarrow$ Integer division of one accurate
+  tick has no accumulating drift, unlike independent oscillators.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{New bytes available from a circular DMA (\code{NDTR})}
+
+\textbf{Problem.} A circular DMA counts down \code{NDTR} from the buffer size.
+Compute how many new bytes arrived since the last check, handling wrap.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Current position = size $-$ \code{NDTR}; new = (position $-$ last) mod
+  size.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint32_t dma_new_bytes(uint32_t size, uint32_t ndtr, uint32_t last_pos,
+                              uint32_t *new_pos) {
+    uint32_t pos   = size - ndtr;                  /* where DMA has written to */
+    uint32_t avail = (pos + size - last_pos) % size;  /* new bytes, wrap-safe  */
+    *new_pos = pos;
+    return avail;
+}
+
+int main(void) {
+    uint32_t np = 0;
+    uint32_t got = dma_new_bytes(64u, 60u, 0u, &np);   /* pos=4 -> 4 new */
+    printf("new=%u pos=%u\n", got, np);
+    return 0;
+}
+\end{cgym}
+
+In circular receive the DMA never stops, so you poll \code{NDTR} (or act on the
+half/full-transfer and idle-line interrupts) to discover how far it has written.
+Position $=$ size $-$ \code{NDTR} because \code{NDTR} counts \emph{down}; the
+modulo handles the wrap so a read that straddles the buffer end still returns the
+right count. This is the standard idiom for receiving variable-length UART
+frames over DMA without an interrupt per byte (Q2.8).
+
+\followups
+\begin{enumerate}
+\item \emph{``Detect end-of-frame.''} $\rightarrow$ The UART IDLE-line
+  interrupt fires on a gap; read \code{NDTR} then to bound the frame.
+\item \emph{``Copy the new bytes out, handling wrap.''} $\rightarrow$ Two
+  \code{memcpy}s if the region crosses the buffer end.
+\item \emph{``Coherency on a cached core?''} $\rightarrow$ Invalidate the
+  buffer region before reading DMA-written data.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Timer-update ISR skeleton (\texttt{// target-only})}
+
+\textbf{Problem.} Write a correct timer update-interrupt handler and the
+two-level enable (peripheral interrupt + NVIC), following the short-ISR and
+flag-clear rules.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Check then clear the update flag; do the minimum; enable both the timer's
+  \code{DIER} bit and the NVIC line.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+// target-only: uses device register definitions (TIM2, NVIC) from the CMSIS header
+
+static volatile uint32_t tick;
+
+void TIM2_IRQHandler(void) {
+    if (TIM2->SR & TIM_SR_UIF) {     /* update event pending? */
+        TIM2->SR &= ~TIM_SR_UIF;     /* clear the flag (rc_w0) BEFORE returning */
+        tick++;                      /* short work only -- defer the rest        */
+    }
+}
+
+void tim2_enable_irq(void) {
+    TIM2->DIER |= (1u << 0);                                 /* timer: update IRQ on */
+    NVIC->ISER[TIM2_IRQn >> 5] = (1u << (TIM2_IRQn & 31));   /* NVIC: enable the line */
+}
+\end{cgym}
+
+Three correctness points an interviewer checks: the \textbf{flag clear} (omit it
+and the handler re-fires forever --- the Q3.4 interrupt storm); the
+\textbf{two-level enable} (the peripheral's \code{DIER} \emph{and} the NVIC
+\code{ISER} --- forgetting the NVIC line is the ``handler never runs'' bug); and
+\textbf{short work} (increment a tick, set a flag --- never parse or print
+here). On STM32 the update flag is clear-by-writing-0; on other parts it may be
+read-then-write or write-1-to-clear --- always check the datasheet.
+
+\followups
+\begin{enumerate}
+\item \emph{``Why clear the flag early, not late?''} $\rightarrow$ If the event
+  recurs during the handler, clearing late can drop or double it; clear it once,
+  deterministically.
+\item \emph{``How does the main loop consume \code{tick} safely?''}
+  $\rightarrow$ It's a single 32-bit value: atomic on a 32-bit core; otherwise
+  the double-read of problem 6.
+\item \emph{``Set this timer's priority below a control ISR.''} $\rightarrow$
+  Give the control interrupt a lower priority number so it pre-empts the tick.
+\end{enumerate}
+\end{gymproblem}
+
+%=====================================================================
+\section{Link to Her Resume}
+%=====================================================================
+
+\begin{resumelink}
+\textbf{Shared-data / timing defects:} ``The HSI timing defects I resolved at
+BEL are the interrupt-shared-data family --- a flag set out of order with the
+data it guards, or a torn read of a multi-byte value. I fix them by separating
+visibility, ordering, and atomicity: \code{volatile} plus a barrier or a short
+\code{PRIMASK} critical section, and lock-free single-writer buffers where I
+can.''
+
+\medskip
+\textbf{Determinism / jitter:} ``A flight-control loop lives or dies on jitter,
+not average latency. I keep the control ISR high-priority, keep critical
+sections short, and measure timing with a GPIO toggle on the scope --- the same
+lab instruments on my resume.''
+
+\medskip
+\textbf{DMA / streaming:} ``For high-rate telemetry I'd take a UART over circular
+DMA with half/full-transfer interrupts rather than an interrupt per byte ---
+it's how you free the CPU and keep jitter down, computing new bytes from
+\code{NDTR}.''
+
+\medskip
+\small Maps to concrete resume lines: BEL HSI timing-defect resolution,
+real-time DPRAM polling with sub-1\,ms latency, and oscilloscope-based debugging
+on the TASL boards. Keep claims to what the resume states; the deep project
+scripting is Chapter 15, from \code{inputs/INTAKE.md} only.
+\end{resumelink}
+
+%=====================================================================
+\section{Self-Test Scorecard}
+%=====================================================================
+
+\begin{scorecard}
+\begin{enumerate}
+\item State the cardinal ISR rule and two things forbidden inside an ISR.
+\item Latency vs jitter --- which usually matters more for a control loop, and
+  why?
+\item Why is a lock-free SPSC ring buffer safe without a mutex?
+\item Is \code{counter++} in the main loop safe if an ISR also increments it?
+  Why or why not?
+\item 84\,MHz timer, want 1\,kHz --- give \code{PSC} and \code{ARR}.
+\item Duty formula: with \code{ARR}=999, what \code{CCR} gives 25\%?
+\item Why should you not kick the watchdog from a standalone timer ISR?
+\item Compute elapsed for a 16-bit timer with \code{prev}=0xFFF0,
+  \code{now}=0x0010.
+\item DMA vs interrupt-per-byte for a 1\,Mbit/s stream --- one-line why DMA
+  wins.
+\item An ISR writes \code{data} then \code{ready=1}; the reader sees stale
+  \code{data}. Name the cause and the fix.
+\end{enumerate}
+\end{scorecard}
+
+\begin{answerkey}
+\begin{enumerate}
+\item Keep it short and non-blocking; forbidden: blocking/busy-wait,
+  \code{malloc}, long loops, non-reentrant calls like \code{printf} (any two).
+\item Jitter --- a control law assumes a fixed sample period, so timing
+  variation degrades stability more than a constant latency does.
+\item Single writer per index: the ISR writes only \code{head}, the main loop
+  only \code{tail}, so they never modify the same variable.
+\item No --- \code{counter++} is load/add/store; an interrupt between load and
+  store loses the ISR's update (lost-update race). Make it atomic / critical
+  section.
+\item \code{PSC}=83 (84\,MHz$\rightarrow$1\,MHz), \code{ARR}=999
+  (1\,MHz/1000 = 1\,kHz).
+\item \code{CCR} = 25\% of (ARR+1) = 0.25$\times$1000 = 250.
+\item Because it fires regardless of whether the main loop is alive, so it
+  satisfies the watchdog while the application is hung --- defeating the point.
+\item \code{(uint16\_t)(0x0010 - 0xFFF0)} = 0x20 = 32 (modular subtraction
+  survives the wrap).
+\item DMA moves bytes with no CPU per-byte cost, interrupting only per block ---
+  thousands of ISRs/s become a few, with far less jitter.
+\item The two stores (or the reader's loads) were reordered; \code{volatile}
+  gives visibility but not ordering. Fix: a barrier / release-store between
+  \code{data} and \code{ready} (and acquire on the reader).
+\end{enumerate}
+\end{answerkey}
+
+\begin{partnote}
+\emph{End of Chapter 4, and of Part A (Embedded C \& Processor Core).} Next:
+Part B opens with \textbf{UART / RS232 / RS422 / RS485} --- frame anatomy, baud
+math and error percentage, differential signalling, and why flight computers
+use RS422 (the daily interface on the resume).
+\end{partnote}

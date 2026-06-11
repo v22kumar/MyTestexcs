@@ -1,0 +1,843 @@
+% chapters/ch08_avionics_buses.tex — Chapter 8: Avionics Data Buses
+% Scope (PLAN.md): MIL-STD-1553B (BC/RT/BM, word types, command/response),
+% ARINC 429 (label/SSM/SDI/word format), Ethernet TCP vs UDP for telemetry,
+% redundancy & cross-channel data link (CCDL) concepts (voting, failover),
+% generic serial processing links (SPIL-type), telemetry packet structure.
+% Budget 40 pp, mix 28 Q&A / 8 code / 4 concept.
+% All snippets verified gcc -Wall -Wextra -std=c11 (zero warnings).
+
+\chapter{Avionics Data Buses}
+\label{ch:avionics-buses}
+
+\begin{partnote}
+\textbf{Scope} --- MIL-STD-1553B (BC/RT/BM, command/status/data words,
+command--response) $\rightarrow$ ARINC 429 (label, SDI, SSM, word format)
+$\rightarrow$ Ethernet TCP vs UDP for telemetry $\rightarrow$ redundancy \&
+cross-channel data links (voting, failover --- the CCDL family) $\rightarrow$
+generic serial processing links (SPIL-type) $\rightarrow$ telemetry packet
+structure \& parsing. This chapter maps directly onto the resume:
+MIL-STD-1553B and RS422 telemetry parsing at BEL, CCDL and SPIL verification at
+TASL.
+\end{partnote}
+
+Where CAN (Chapter 7) is the vehicle/robotics bus, these are the
+\emph{flight-grade} buses --- older, simpler, deterministic, and certified into
+decades of aircraft. The recurring theme is \textbf{determinism and
+redundancy}: a single bus controller commanding a fixed schedule (1553),
+one-way broadcast with no contention (ARINC 429), and redundant channels that
+cross-check each other (CCDL). This is the candidate's home ground.
+
+%=====================================================================
+\section{Primer}
+%=====================================================================
+
+\subsection{MIL-STD-1553B --- commanded, deterministic, redundant}
+
+1553 is a \textbf{command/response} bus: a single \textbf{Bus Controller (BC)}
+initiates every transfer; \textbf{Remote Terminals (RTs)} only speak when
+commanded; a \textbf{Bus Monitor (BM)} passively records. It runs at 1\,Mbit/s,
+Manchester-encoded over a dual-redundant transformer-coupled twisted pair (bus A
+and bus B --- if one fails, traffic continues on the other). Communication is in
+20-bit \textbf{words} (3-bit sync + 16 data + 1 parity) of three types:
+\textbf{command} (from the BC: RT address, transmit/receive, subaddress, word
+count), \textbf{status} (from an RT: its address plus health/condition bits),
+and \textbf{data}. Because the BC owns a fixed schedule, latency and bus
+behaviour are fully deterministic --- the reason 1553 has flown on military
+aircraft since the 1970s.
+
+\subsection{ARINC 429 --- one-way broadcast, label-addressed}
+
+ARINC 429 is the civil-aircraft workhorse: a \textbf{single transmitter}
+broadcasts to up to 20 receivers over a shielded twisted pair, one direction
+only --- if a unit needs to talk back, it needs its own 429 bus. Each 32-bit
+word is self-describing: an 8-bit \textbf{label} (octal, identifying the
+parameter --- airspeed, altitude), a 2-bit \textbf{SDI} (source/destination
+identifier), 19 bits of \textbf{data} (BNR binary or BCD), a 2-bit \textbf{SSM}
+(sign/status matrix --- valid, no-computed-data, functional-test, sign), and an
+odd-\textbf{parity} bit. Speeds are low (12.5\,kbit/s) or high (100\,kbit/s).
+There's no addressing handshake and no contention because there's only ever one
+talker --- determinism through simplicity.
+
+\subsection{Ethernet, TCP vs UDP, and telemetry}
+
+Modern avionics adds Ethernet (and the deterministic AFDX/ARINC 664 variant).
+The interview-relevant distinction is \textbf{TCP vs UDP}: TCP is connection-
+oriented, reliable, ordered, with retransmission and flow control --- good for
+configuration and file transfer, but its retransmissions add unbounded latency.
+UDP is connectionless, unordered, best-effort --- and is what \emph{telemetry}
+uses, because for a stream of periodic samples a fresh sample matters more than
+re-delivering a stale lost one. A dropped telemetry packet is simply superseded
+by the next; you'd never want TCP stalling the stream to redeliver it. You add
+your own lightweight sequence number / timestamp on top of UDP to detect loss.
+
+\subsection{Redundancy: CCDL, voting, failover, SPIL}
+
+Flight-critical systems run \textbf{redundant channels} (dual, triple, or quad)
+computing the same control law in parallel. A \textbf{Cross-Channel Data Link
+(CCDL)} lets these channels exchange their inputs and outputs every frame so
+they can \textbf{vote}: with three or more channels, a \textbf{median/majority
+vote} masks a single faulty channel (a divergent value is outvoted), and
+\textbf{failover} drops an unhealthy channel and continues on the rest. The CCDL
+must be fast, deterministic, and itself fault-tolerant, because the voting
+happens every control frame. A \textbf{SPIL}-type serial processing/inter-link
+is a point-to-point serial data link between cards/processors carrying such
+inter-channel or inter-card data. The candidate verifies exactly these:
+CCDL integrity/timing/failover and SPIL packet-level behaviour.
+
+%=====================================================================
+\section{Q\&A Bank}
+%=====================================================================
+
+\tierbanner{Tier 1 --- Screening (phone / HR-technical)}%
+{Two to four sentences. Avionics-bus vocabulary --- expected for any
+flight-systems role.}
+
+\question{Q1.1}{What kind of bus is MIL-STD-1553B?}
+A deterministic command/response military avionics bus at 1\,Mbit/s: a single
+Bus Controller commands all traffic, Remote Terminals respond only when
+addressed, and the dual-redundant transformer-coupled bus tolerates a cable
+fault. It's been standard on military aircraft since the 1970s.
+
+\question{Q1.2}{What are the three terminal types on a 1553 bus?}
+Bus Controller (BC) --- initiates every transfer and owns the schedule; Remote
+Terminal (RT) --- a subsystem that responds only when commanded; Bus Monitor
+(BM) --- a passive listener that records traffic without participating.
+
+\question{Q1.3}{What are the three 1553 word types?}
+Command word (BC$\rightarrow$RT: RT address, transmit/receive bit, subaddress,
+word count), status word (RT$\rightarrow$BC: RT address plus condition/health
+bits), and data word (16 bits of payload). Each is 20 bits: 3 sync + 16 + 1
+parity.
+
+\question{Q1.4}{What kind of bus is ARINC 429?}
+A civil-avionics one-way broadcast bus: a single transmitter sends 32-bit
+labelled words to up to 20 receivers over a twisted pair, one direction only.
+No addressing handshake, no contention --- simplicity gives determinism.
+
+\question{Q1.5}{What's in an ARINC 429 word?}
+An 8-bit label (the parameter ID, in octal), 2-bit SDI (source/destination),
+19 data bits (BNR or BCD), 2-bit SSM (sign/status), and an odd-parity bit ---
+32 bits total, self-describing.
+
+\question{Q1.6}{Why does telemetry use UDP rather than TCP?}
+Telemetry is a stream of periodic samples where a fresh value supersedes a lost
+one, so UDP's best-effort, low-latency delivery fits; TCP's retransmission and
+ordering would stall the stream to re-deliver stale data. You add your own
+sequence numbers to detect loss.
+
+\question{Q1.7}{What is a Cross-Channel Data Link (CCDL)?}
+A link between redundant flight-control channels that lets them exchange their
+inputs and outputs each frame, so they can cross-check and vote --- the basis of
+masking a faulty channel and failing over. It must be fast and deterministic.
+
+\question{Q1.8}{What is redundancy voting?}
+With multiple channels computing the same result, a vote (majority for
+discretes, median for analog values) selects the agreed output and masks a
+single divergent channel --- so one fault doesn't propagate to the actuator.
+
+\question{Q1.9}{Why is 1553 dual-redundant?}
+It has two independent buses (A and B); if a transceiver, stub, or cable fails
+on one, the BC retries on the other, so a single physical fault doesn't lose
+communication --- essential for flight-critical subsystems.
+
+\question{Q1.10}{What is Manchester encoding and why does 1553 use it?}
+Each bit is a mid-bit transition (the encoding carries its own clock), so the
+receiver recovers timing from the data and there's no DC component --- ideal for
+transformer coupling. It costs double the bandwidth but gives robust,
+self-clocking, galvanically-isolated signalling.
+
+\tierbanner{Tier 2 --- Core technical (panel round)}%
+{A short paragraph.}
+
+\question{Q2.1}{Walk a 1553 BC-to-RT (receive) transfer.}
+The BC sends a \textbf{command word} (RT address, T/R = receive, subaddress,
+word count $N$), immediately followed by $N$ \textbf{data words}. The addressed
+RT validates the command, receives the data, and after the required response
+time replies with its \textbf{status word} (its address + condition bits). For
+an RT-to-BC (transmit) transfer, the BC sends the command (T/R = transmit) and
+the RT responds with its status word \emph{then} the requested data words. Every
+exchange is BC-initiated and bounded in time --- the determinism that makes 1553
+analysable.
+
+\question{Q2.2}{Decode a 1553 command word's fields.}
+The 16 data bits are: RT address (5 bits, 0--31; 31 is broadcast), T/R bit
+(1 = transmit from RT, 0 = receive to RT), subaddress (5 bits --- selects the
+data buffer/function; subaddresses 0 and 31 signal mode codes), and word count
+(5 bits, where 0 means 32 words). So you can read off ``RT 5, receive, subaddress
+1, 2 words'' directly from the bit fields (Coding Gym).
+
+\question{Q2.3}{What does the 1553 status word tell the BC?}
+The RT's address (echo, for validation) plus condition bits: Message Error,
+Instrumentation, Service Request, Broadcast Command Received, Busy, Subsystem
+Flag, Dynamic Bus Control Acceptance, and Terminal Flag. The BC inspects these
+to confirm the RT received the message cleanly and is healthy; a set Message
+Error or Terminal Flag triggers retry or fault handling. It's the RT's only way
+to report status, since RTs never speak unbidden.
+
+\question{Q2.4}{Decode an ARINC 429 word, field by field.}
+From the 32-bit word: bits 1--8 the \textbf{label} (octal parameter ID, and note
+the label is bit-\emph{reversed} on the wire), bits 9--10 the \textbf{SDI}
+(which source/sink, or part of the data), bits 11--29 the \textbf{data} (BNR
+two's-complement or BCD), bits 30--31 the \textbf{SSM} (Normal Operation /
+No-Computed-Data / Functional-Test / Failure-Warning, plus sign for BNR), bit 32
+\textbf{parity} (odd). The receiver checks parity, reads the SSM to know if the
+data is valid, then scales the data per the label's definition.
+
+\question{Q2.5}{What is the SSM and why must you check it before using the
+data?}
+The Sign/Status Matrix reports the \emph{validity and sign} of the word: it can
+say Normal Operation, No-Computed-Data (the source can't compute this parameter
+right now), Functional-Test, or Failure-Warning. If you scale and use the data
+bits without checking the SSM, you can act on a number the source has flagged as
+invalid or test data --- a serious integration bug. Always gate on SSM = Normal
+before trusting the value.
+
+\question{Q2.6}{Why is ARINC 429's label transmitted bit-reversed, and what's
+the practical consequence?}
+Historically the label is transmitted with its bits in reverse order relative to
+the rest of the word (a legacy of the standard). The practical consequence is
+that firmware/test code must reverse the 8 label bits to recover the octal label
+the documentation lists --- forget the reversal and every label looks wrong, a
+classic ``the bus decode is garbage'' bug when first bringing up a 429 receiver.
+A simple 8-bit reverse (Coding Gym) fixes it.
+
+\question{Q2.7}{TCP vs UDP --- when would an avionics system actually use TCP?}
+For \emph{reliable, ordered, non-real-time} transfers: uploading a
+configuration or software update, downloading a recorded data file, or a
+maintenance/diagnostic session where every byte must arrive correctly and
+latency doesn't matter. The streaming, periodic, latency-sensitive traffic
+(telemetry, sensor data) uses UDP (or a deterministic protocol like AFDX). The
+rule: reliability-over-latency $\rightarrow$ TCP; freshness-over-reliability
+$\rightarrow$ UDP.
+
+\question{Q2.8}{How does median voting across three channels mask a fault?}
+Each of three redundant channels computes the same value; the voter takes the
+\textbf{median} (middle value). If one channel is faulty and produces a wild
+value, it sorts to the top or bottom and the median is one of the two good,
+agreeing channels --- so the fault is masked without needing to know \emph{which}
+channel failed. Median (not average) is used because an average would be dragged
+toward the bad value; the median rejects the outlier entirely. This runs every
+control frame (Coding Gym).
+
+\question{Q2.9}{What does a CCDL actually carry, and why every frame?}
+It carries each channel's sensor inputs and/or computed outputs to the other
+channels so that, within the same control frame, every channel has all channels'
+data and can vote on a common result before driving the actuator. It must happen
+\emph{every} frame because the vote must use current data --- stale cross-channel
+data would let channels diverge. Hence the CCDL's defining requirements:
+bounded latency, frame-deterministic delivery, and its own integrity checking
+(the things the resume says she verifies: data integrity, timing, failover).
+
+\question{Q2.10}{How would you structure and parse a telemetry frame robustly?}
+A frame has a \textbf{sync word} (a fixed pattern to find frame start), a
+\textbf{length} field, the \textbf{payload}, and a \textbf{CRC/checksum}. The
+parser scans the byte stream for the sync pattern, reads the length, validates
+the checksum over the frame, and only then delivers the payload; on a checksum
+failure it discards and \emph{re-scans for the next sync} rather than trusting
+byte alignment. This tolerates dropped/inserted bytes and noise --- the same
+``never trust alignment, validate every frame'' discipline as the UART and CAN
+chapters, and exactly the RS422/1553B telemetry parsing on the resume.
+
+\question{Q2.11}{What is a SPIL-type link in this context?}
+A serial processing/inter-processor link --- a point-to-point serial data link
+between cards or processors carrying inter-channel or inter-card data (here, over
+RS422). You verify it at the \emph{packet level}: framing, integrity, timing,
+throughput, and behaviour under fault/loss. It's conceptually a private,
+deterministic serial pipe between specific endpoints, distinct from a shared bus
+like 1553 or CAN, and is validated with the same framing/CRC/timing rigour.
+
+\tierbanner{Tier 3 --- Trap \& depth (principal-engineer level)}%
+{A paragraph plus the trap. The defensible depth behind 1553B / CCDL / SPIL on
+the resume.}
+
+\question{Q3.1}{Why does median voting need an \emph{odd} number of channels,
+and what happens with only two?}
+Median/majority voting needs a tie-breaker: with three channels a single
+outlier is outvoted by the two agreeing ones, so the fault is both \emph{masked}
+and implicitly \emph{identified} (the disagreeing channel). With only \textbf{two}
+channels you can \emph{detect} a disagreement but not resolve it --- you don't
+know which one is right, so dual systems can only fail-safe (e.g.\ disengage,
+revert to a default, or use a separate monitor), not fail-operational. \trap the
+trap is assuming ``redundancy = keeps working''; dual redundancy gives
+fail-\emph{detection}, triple gives fail-\emph{operational} (survive one fault
+and keep flying), quad survives two. Knowing that voting topology determines
+\emph{fail-safe vs fail-operational} is core flight-controls judgement and
+directly frames CCDL verification.
+
+\question{Q3.2}{Two redundant channels must agree to vote --- but their clocks
+and sensors differ slightly. How do you vote without false fault trips?}
+Real channels are never bit-identical: sensors have noise/tolerance, ADCs
+quantise differently, and clocks drift, so raw values differ even when all are
+healthy. The voter must use a \textbf{threshold/tolerance band} (and often
+temporal filtering --- a channel must disagree beyond the band for several
+consecutive frames) before declaring a fault, and channels must be
+\textbf{frame-synchronised} via the CCDL so they're comparing data from the same
+sample instant. \trap the trap is an exact-equality vote, which trips constantly
+on normal noise (nuisance failover), or an un-synchronised vote that compares
+this-frame data against last-frame data (phase error read as disagreement). The
+real design tunes the disagreement threshold and the persistence count, and
+keeps the channels frame-locked through the CCDL --- precisely the
+``integrity/timing/failover'' verification on the resume.
+
+\question{Q3.3}{An RT intermittently sets the Message Error bit on a 1553 bus.
+Walk the investigation.}
+Message Error means the RT detected a problem with the command/data it received
+(bad parity, wrong word count, gap/sync error, or an illegal command). Hunt:
+(1) \textbf{physical} --- scope the Manchester waveform on both buses for
+amplitude/reflection issues (stub length, coupling transformer, termination),
+since 1553 is unforgiving of stub-length and impedance errors; (2)
+\textbf{timing} --- check the BC's inter-message gaps and the RT's response-time
+window; (3) \textbf{protocol} --- is the BC sending an illegal subaddress/word
+count that this RT rejects; (4) \textbf{redundancy} --- does it happen on bus A,
+B, or both (both $\rightarrow$ BC/RT logic; one $\rightarrow$ that channel's
+hardware). \trap the trap is treating Message Error as ``the RT is broken'';
+it's the RT \emph{reporting} a received-message fault, so the cause is usually on
+the BC side or the physical layer. The bus-monitor capture plus a scope on the
+coupled waveform localises it --- the same instrument-led method across the
+book.
+
+\question{Q3.4}{Why can't you just cast a received 1553/ARINC/telemetry buffer
+onto a C struct, and what's the correct parser?}
+Three compounding hazards (Chapters 1 \& 3): \textbf{endianness} (avionics words
+are often big-endian / specific bit orders, the host is usually little-endian),
+\textbf{bit-field layout} (implementation-defined, so a bitfield struct over a
+429 word or 1553 word may map differently per compiler), and \textbf{the
+wire's own quirks} (the ARINC label is bit-reversed; 1553 packs sub-16-bit
+fields). The correct parser reads the raw words and extracts each field with
+explicit shifts and masks (and explicit byte/bit-order conversion), validates
+parity/CRC and the status/SSM, and never trusts struct overlay. \trap the trap
+is the convenient \code{(word\_t*)buf} cast that ``works'' on one build and
+silently corrupts on another compiler or a big-endian target --- which is
+exactly why the resume's 1553B/RS422 parsing is done at the bit/byte level, the
+field-by-field discipline this whole book reinforces.
+
+\question{Q3.5}{Compare CAN, 1553, and ARINC 429 on determinism --- when is
+each the right choice?}
+\textbf{1553}: fully deterministic by central schedule (the BC dictates every
+transfer), dual-redundant, certified --- the choice for flight-critical
+command/response on military platforms, at the cost of a heavy BC and 1\,Mbit/s
+ceiling. \textbf{ARINC 429}: deterministic by simplicity (one talker, no
+contention), cheap and robust, but one-way and low-rate --- ideal for
+broadcasting a sensor's parameters to many listeners on civil aircraft.
+\textbf{CAN}: deterministic by \emph{priority} (lowest ID wins) but multi-master
+and event-capable --- flexible and cheap, great for vehicles/UAV subsystems, but
+worst-case latency needs a bus-load analysis (Chapter 7) and it lacks 1553's
+central schedule and certification pedigree. \trap the trap is ranking them
+``best to worst''; they encode \emph{different determinism philosophies}
+(scheduled vs broadcast vs prioritised) for different criticality and topology.
+Articulating that --- and that a UAV may use \emph{all three} (CAN for servos,
+429-style for sensors, a 1553/CCDL core for flight-critical voting) --- is the
+systems-integration view the resume points to.
+
+%=====================================================================
+\section{Coding Gym}
+%=====================================================================
+
+\begin{partnote}
+Eight host-compilable problems (verified under
+\code{gcc -Wall -Wextra -std=c11}) implementing the field extraction, parity,
+voting, and framing you actually perform validating 1553B / ARINC 429 / CCDL /
+telemetry --- the byte-level parsing the resume describes.
+\end{partnote}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Pack and extract an ARINC 429 word}
+
+\textbf{Problem.} Assemble a 32-bit ARINC 429 word from label/SDI/data/SSM and
+extract the fields back.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Label bits 1--8, SDI 9--10, data 11--29, SSM 30--31, parity 32.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint32_t a429_pack(uint8_t label, uint8_t sdi, uint32_t data19, uint8_t ssm) {
+    uint32_t w = 0;
+    w |= label;                          /* bits 1-8   */
+    w |= (uint32_t)(sdi & 0x3u) << 8;    /* bits 9-10  */
+    w |= (data19 & 0x7FFFFu) << 10;      /* bits 11-29 */
+    w |= (uint32_t)(ssm & 0x3u) << 29;   /* bits 30-31 */
+    return w;
+}
+static uint8_t  a429_label(uint32_t w) { return (uint8_t)(w & 0xFFu); }
+static uint8_t  a429_sdi(uint32_t w)   { return (uint8_t)((w >> 8) & 0x3u); }
+static uint32_t a429_data(uint32_t w)  { return (w >> 10) & 0x7FFFFu; }
+static uint8_t  a429_ssm(uint32_t w)   { return (uint8_t)((w >> 29) & 0x3u); }
+
+int main(void) {
+    uint32_t w = a429_pack(0312u & 0xFF, 0x1u, 0x5A5Au, 0x3u);
+    printf("label=0%o sdi=%u data=0x%05X ssm=%u\n",
+           a429_label(w), a429_sdi(w), a429_data(w), a429_ssm(w));
+    /* label=0312 sdi=1 data=0x05A5A ssm=3 */
+    return 0;
+}
+\end{cgym}
+
+Each field is extracted with an explicit shift and mask --- \emph{not} a bitfield
+struct overlay, which would be non-portable across compilers and endianness
+(Q3.4). The label prints in octal because that's how ARINC documents it. This is
+the literal core of a 429 receive driver and of the kind of telemetry parser the
+resume describes.
+
+\followups
+\begin{enumerate}
+\item \emph{``Where's the parity bit?''} $\rightarrow$ Bit 32 (next problem);
+  set for odd parity over the lower 31 bits.
+\item \emph{``Scale BNR data.''} $\rightarrow$ The data field is
+  two's-complement with a per-label LSB weight; multiply by the resolution.
+\item \emph{``Why mask each field on insert?''} $\rightarrow$ Defensive --- a
+  too-wide argument would corrupt the neighbouring field.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{ARINC 429 odd parity}
+
+\textbf{Problem.} Set bit 32 for odd parity and provide a check.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Count the 1s in bits 1--31; if even, set bit 32 to make the total odd.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static int popcount32(uint32_t x) { int n = 0; while (x) { n++; x &= x - 1; } return n; }
+
+static uint32_t a429_set_parity(uint32_t w) {
+    if ((popcount32(w & 0x7FFFFFFFu) & 1) == 0)   /* lower 31 bits are even? */
+        w |= 0x80000000u;                          /* set bit 32 -> total odd */
+    return w;
+}
+static int a429_parity_ok(uint32_t w) { return popcount32(w) & 1; }   /* odd == good */
+
+int main(void) {
+    uint32_t w = a429_set_parity(0x0A5A5u);
+    printf("parity_ok=%d\n", a429_parity_ok(w));   /* 1 */
+    return 0;
+}
+\end{cgym}
+
+ARINC 429 uses \textbf{odd} parity over the whole word, so a healthy received
+word always has an odd number of 1s. The receiver recomputes and rejects any
+word with even parity --- the first integrity gate before even looking at the
+SSM. It catches single-bit errors (the dominant noise failure) but, like UART
+parity, misses even-count errors --- which is why critical data also carries
+application-level validity (the SSM) and often a higher-layer checksum.
+
+\followups
+\begin{enumerate}
+\item \emph{``Why odd, not even?''} $\rightarrow$ Odd parity guarantees at least
+  one 1, so an all-zero (dead) line is detectably invalid.
+\item \emph{``Catch a 2-bit error?''} $\rightarrow$ Parity can't; rely on SSM /
+  range checks / higher-layer CRC.
+\item \emph{``Where does parity sit relative to SSM in validation?''}
+  $\rightarrow$ Parity first (word intact?), then SSM (data valid?).
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Reverse the ARINC 429 label}
+
+\textbf{Problem.} The label is transmitted bit-reversed; reverse 8 bits to
+recover the documented octal label.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Swap nibbles, then pairs, then adjacent bits.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint8_t reverse8(uint8_t b) {
+    b = (uint8_t)((b >> 4) | (b << 4));                       /* swap nibbles */
+    b = (uint8_t)(((b & 0xCCu) >> 2) | ((b & 0x33u) << 2));   /* swap pairs   */
+    b = (uint8_t)(((b & 0xAAu) >> 1) | ((b & 0x55u) << 1));   /* swap bits    */
+    return b;
+}
+
+int main(void) {
+    printf("reverse8(0x0A)=0x%02X\n", reverse8(0x0A));   /* 0x50 */
+    return 0;
+}
+\end{cgym}
+
+This $O(1)$ bit-reverse is the fix for the most common ARINC 429 bring-up bug:
+the label on the wire is reversed relative to the documented octal value, so
+without this every parameter looks like the wrong label and the whole decode
+appears broken (Q2.6). It's the same mask-and-swap pattern as the reverse-bits
+problem in Chapter 1, applied to a real protocol quirk.
+
+\followups
+\begin{enumerate}
+\item \emph{``Why does the standard reverse it?''} $\rightarrow$ Historical wire
+  convention; you just have to honour it.
+\item \emph{``Table-driven reverse for speed?''} $\rightarrow$ A 256-entry
+  lookup if labels are decoded at high rate.
+\item \emph{``How would you catch this bug on a logic analyser?''}
+  $\rightarrow$ Known label (e.g.\ 0310 altitude) decodes wrong until you
+  reverse.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Decode a MIL-STD-1553 command word}
+
+\textbf{Problem.} Extract RT address, T/R, subaddress, and word count from a
+1553 command word.
+
+\textbf{Hints.}
+\begin{itemize}
+\item RT addr bits 15--11, T/R bit 10, subaddress 9--5, word count 4--0
+  (0 means 32).
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+typedef struct { int rt, tr, sa, wc; } cmd1553_t;
+
+static cmd1553_t cmd1553_decode(uint16_t w) {
+    cmd1553_t c;
+    c.rt = (w >> 11) & 0x1F;   /* RT address  */
+    c.tr = (w >> 10) & 1;      /* 1=transmit  */
+    c.sa = (w >> 5)  & 0x1F;   /* subaddress  */
+    c.wc =  w        & 0x1F;   /* word count (0 => 32) */
+    return c;
+}
+
+int main(void) {
+    cmd1553_t c = cmd1553_decode(0x2C22);
+    printf("rt=%d tr=%d sa=%d wc=%d\n", c.rt, c.tr, c.sa, c.wc);  /* 5 1 1 2 */
+    return 0;
+}
+\end{cgym}
+
+The command word is the BC's instruction: ``RT 5, transmit, subaddress 1, 2
+words.'' Subaddresses 0 and 31 are special (they signal \emph{mode commands}
+like synchronise or transmit-status, with the word-count field becoming a mode
+code), and word count 0 means 32 words --- two edge cases a correct decoder must
+handle. A bus monitor decodes exactly this to follow the traffic.
+
+\followups
+\begin{enumerate}
+\item \emph{``What does subaddress 0 or 31 mean?''} $\rightarrow$ A mode command;
+  the WC field is then a mode code, not a count.
+\item \emph{``RT address 31?''} $\rightarrow$ Broadcast to all RTs (no status
+  response expected).
+\item \emph{``Word count 0?''} $\rightarrow$ 32 data words (the field can't
+  encode 32 in 5 bits).
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Decode a MIL-STD-1553 status word}
+
+\textbf{Problem.} Extract the RT address and the key condition bits from a
+status word.
+
+\textbf{Hints.}
+\begin{itemize}
+\item RT addr 15--11, Message Error bit 10, Service Request bit 8, Busy bit 3.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+typedef struct { int rt, msg_err, sreq, busy; } stat1553_t;
+
+static stat1553_t stat1553_decode(uint16_t w) {
+    stat1553_t s;
+    s.rt      = (w >> 11) & 0x1F;
+    s.msg_err = (w >> 10) & 1;    /* Message Error  */
+    s.sreq    = (w >> 8)  & 1;    /* Service Request */
+    s.busy    = (w >> 3)  & 1;    /* Busy            */
+    return s;
+}
+
+int main(void) {
+    stat1553_t s = stat1553_decode(0x2800);   /* RT 5, all clear */
+    printf("rt=%d msg_err=%d sreq=%d busy=%d\n", s.rt, s.msg_err, s.sreq, s.busy);
+    return 0;
+}
+\end{cgym}
+
+The status word is the RT's only voice: the BC reads it after every transfer to
+confirm health. Message Error means the RT rejected the command/data (Q3.3);
+Busy means it can't service the request now; Service Request asks the BC for
+attention. The BC's fault logic keys off these bits --- a set Message Error or
+Terminal Flag drives a retry or a declared RT fault.
+
+\followups
+\begin{enumerate}
+\item \emph{``Why does the RT echo its own address in the status word?''}
+  $\rightarrow$ So the BC can confirm the \emph{correct} RT responded.
+\item \emph{``RT doesn't respond at all --- BC action?''} $\rightarrow$
+  Response-timeout $\rightarrow$ retry on the other bus, then declare the RT
+  failed.
+\item \emph{``Broadcast command --- is there a status word?''} $\rightarrow$ No
+  status response to a broadcast (RT 31).
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Find and validate a telemetry frame}
+
+\textbf{Problem.} Scan a byte stream for a sync pattern and validate the frame's
+checksum.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Find sync (e.g.\ \code{0xEB 0x90}); sum the frame bytes; compare to the
+  trailing checksum.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static int tlm_find(const uint8_t *buf, int n, int *start) {
+    for (int i = 0; i + 1 < n; i++)
+        if (buf[i] == 0xEB && buf[i + 1] == 0x90) { *start = i; return 1; }
+    return 0;
+}
+static int tlm_validate(const uint8_t *f, int len) {
+    uint8_t sum = 0;
+    for (int i = 0; i < len - 1; i++) sum = (uint8_t)(sum + f[i]);
+    return sum == f[len - 1];          /* trailing byte is the checksum */
+}
+
+int main(void) {
+    uint8_t buf[] = {0x00, 0xEB,0x90, 0x03, 0x10,0x20, 0xAE};
+    int st;
+    tlm_find(buf, 7, &st);
+    printf("found@%d valid=%d\n", st, tlm_validate(buf + st, 6));   /* 1 1 */
+    return 0;
+}
+\end{cgym}
+
+The parser \emph{re-finds the sync} in the stream rather than assuming byte
+alignment, then validates the checksum before trusting the payload --- so a
+dropped or inserted byte (noise on the RS422 line) is detected and the parser
+resynchronises on the next sync word instead of mis-decoding every following
+field. This is the robust framing the resume's RS422/telemetry parsing relies
+on (Q2.10).
+
+\followups
+\begin{enumerate}
+\item \emph{``Replace the sum with a CRC.''} $\rightarrow$ Stronger burst-error
+  detection (Chapter 13); same find-then-validate structure.
+\item \emph{``Two sync bytes appear inside the payload --- problem?''}
+  $\rightarrow$ Possible false sync; the length+checksum reject it, then
+  re-scan.
+\item \emph{``Stream split across reads (DMA buffer wrap)?''} $\rightarrow$
+  Carry a small residual between buffers; never assume a frame fits one read.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{CCDL median-of-three voting}
+
+\textbf{Problem.} Vote three redundant channel values by selecting the median.
+
+\textbf{Hints.}
+\begin{itemize}
+\item The median is the value that lies between the other two.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static int32_t median3(int32_t a, int32_t b, int32_t c) {
+    if ((a >= b && a <= c) || (a <= b && a >= c)) return a;
+    if ((b >= a && b <= c) || (b <= a && b >= c)) return b;
+    return c;
+}
+
+int main(void) {
+    printf("%d %d\n", median3(10, 30, 20), median3(5, 5, 9));   /* 20  5 */
+    return 0;
+}
+\end{cgym}
+
+Median voting masks a single faulty channel: if one channel returns a wild value
+it sorts to an extreme and the median is one of the two agreeing channels
+(Q2.8). Median --- not average --- is essential, because an average is dragged
+toward the bad value while the median rejects the outlier entirely. In a real
+voter you'd pair this with a tolerance band and a persistence count so sensor
+noise doesn't trip a false failover (Q3.2). This is the arithmetic heart of
+CCDL voting.
+
+\followups
+\begin{enumerate}
+\item \emph{``Add a disagreement threshold.''} $\rightarrow$ Flag a fault only
+  if the outlier exceeds the median by more than a band for $N$ frames.
+\item \emph{``Two channels only?''} $\rightarrow$ Can detect but not vote;
+  fail-safe instead (Q3.1).
+\item \emph{``Four channels?''} $\rightarrow$ Average the middle two, or
+  drop-the-outlier then vote --- survives two faults.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Failover channel selection}
+
+\textbf{Problem.} Pick the lowest-index healthy channel; report none available.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Scan health flags; return the first healthy index, or $-1$.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+static int select_channel(const int *healthy, int n) {
+    for (int i = 0; i < n; i++)
+        if (healthy[i]) return i;
+    return -1;                       /* all channels failed */
+}
+
+int main(void) {
+    int h[3]  = {0, 1, 1};
+    int hn[3] = {0, 0, 0};
+    printf("%d %d\n", select_channel(h, 3), select_channel(hn, 3));   /* 1  -1 */
+    return 0;
+}
+\end{cgym}
+
+After voting flags a channel unhealthy, failover continues on the remaining
+good channels; this picks a primary by priority order. The $-1$ ``no healthy
+channel'' case is the one that matters most: the system must have a defined
+safe response (revert to a backup law, hold last-good, or controlled
+disengage) rather than using garbage --- the difference between fail-operational
+and fail-safe (Q3.1). The health flags themselves come from the voter, parity/
+CRC checks, and heartbeat/timeout monitors.
+
+\followups
+\begin{enumerate}
+\item \emph{``Don't thrash between channels.''} $\rightarrow$ Add hysteresis ---
+  require $N$ healthy frames before switching back.
+\item \emph{``All channels fail --- then what?''} $\rightarrow$ A predefined
+  safe state, never undefined behaviour; this is the critical path.
+\item \emph{``Where do the health flags come from?''} $\rightarrow$ Voter
+  disagreement, parity/CRC, SSM/status bits, and heartbeat timeouts.
+\end{enumerate}
+\end{gymproblem}
+
+%=====================================================================
+\section{Link to Her Resume}
+%=====================================================================
+
+\begin{resumelink}
+\textbf{1553B / telemetry parsing:} ``At BEL I parsed MIL-STD-1553B and RS422
+telemetry --- I decode command/status words and 429-style labels with explicit
+shifts and masks, validate parity/CRC and the status/SSM before trusting any
+value, and re-find the sync word on a bad frame rather than trusting byte
+alignment.''
+
+\medskip
+\textbf{CCDL verification:} ``CCDL is the cross-channel link redundant flight
+channels use to exchange data and vote each frame. I verify its integrity,
+timing, and failover --- which means frame-synchronised channels, a
+median/threshold vote that masks one bad channel without nuisance-tripping on
+sensor noise, and a defined safe state when channels are lost.''
+
+\medskip
+\textbf{SPIL:} ``SPIL is a point-to-point serial processing link between cards;
+I test it at the packet level --- framing, integrity, timing, and behaviour
+under loss --- the same byte-level rigour I apply to every serial interface.''
+
+\medskip
+\small Maps directly to the resume: 1553B/RS422 telemetry parsing and the Python
+automation at BEL, CCDL and SPIL verification at TASL. Keep claims to what the
+resume states; the deep, defensible project scripting is Chapter 15, built only
+from \code{inputs/INTAKE.md}.
+\end{resumelink}
+
+%=====================================================================
+\section{Self-Test Scorecard}
+%=====================================================================
+
+\begin{scorecard}
+\begin{enumerate}
+\item What are the three 1553 terminal types and which initiates transfers?
+\item Name the three 1553 word types and what each carries.
+\item What fields are in an ARINC 429 word, and which one tells you if the data
+  is valid?
+\item Why is the ARINC 429 label commonly reversed in firmware?
+\item Why does telemetry use UDP over TCP?
+\item What does a CCDL carry, and why every control frame?
+\item Why median (not average) voting, and why an odd number of channels?
+\item Decode 1553 command word \code{0x2C22} (RT, T/R, SA, WC).
+\item Why can't you cast a received avionics word onto a C bitfield struct?
+\item Dual vs triple redundancy --- fail-safe or fail-operational, and why?
+\end{enumerate}
+\end{scorecard}
+
+\begin{answerkey}
+\begin{enumerate}
+\item Bus Controller (initiates all transfers), Remote Terminal (responds when
+  commanded), Bus Monitor (passive listener).
+\item Command (BC$\rightarrow$RT: address/T-R/subaddr/word-count), status
+  (RT$\rightarrow$BC: address + condition bits), data (16-bit payload).
+\item Label, SDI, data, SSM, parity; the \textbf{SSM} reports validity (Normal /
+  No-Computed-Data / Test / Failure).
+\item The label is transmitted bit-reversed on the wire, so firmware reverses 8
+  bits to recover the documented octal label.
+\item A fresh sample supersedes a lost one; TCP's retransmission/ordering would
+  stall the stream to re-deliver stale data.
+\item Each channel's inputs/outputs to the others, every frame, so all channels
+  vote on current data before driving the actuator.
+\item Median rejects an outlier (an average is dragged toward it); an odd count
+  gives a tie-breaker so one fault is outvoted.
+\item RT 5, T/R = transmit (1), subaddress 1, word count 2.
+\item Endianness, implementation-defined bitfield layout, and wire quirks
+  (reversed label, packed fields) make struct overlay non-portable/corrupt ---
+  use shifts and masks.
+\item Dual = fail-safe (detect a disagreement but can't tell which is right);
+  triple = fail-operational (outvote one fault and keep operating).
+\end{enumerate}
+\end{answerkey}
+
+\begin{partnote}
+\emph{End of Chapter 8, and of Part B (Communication Protocols).} Next: Part C
+opens with \textbf{RTOS \& Real-Time} --- tasks and scheduling, priority
+inversion, mutex vs semaphore, determinism, and the shared-memory/DPRAM handshake
+patterns from the BEL work.
+\end{partnote}

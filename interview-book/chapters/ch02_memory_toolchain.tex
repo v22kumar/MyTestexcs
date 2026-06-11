@@ -1,0 +1,1086 @@
+% chapters/ch02_memory_toolchain.tex — Chapter 2: Memory & Toolchain
+% Scope (PLAN.md): memory map of an embedded program, stack vs heap,
+% .text/.data/.bss, linker scripts, startup code (what runs before main),
+% compilation stages, Makefiles, stack overflow & memory corruption diagnosis.
+% Budget 30 pp, mix 15 Q&A / 12 code / 3 concept.
+% All host-compilable snippets verified with gcc -Wall -Wextra -std=c11 (zero
+% warnings). Target-only fragments are marked and excluded from host builds.
+
+\chapter{Memory \& Toolchain}
+\label{ch:memory-toolchain}
+
+\begin{partnote}
+\textbf{Scope} --- The memory map of an embedded program $\rightarrow$ stack
+vs heap $\rightarrow$ \code{.text}/\code{.data}/\code{.bss}/\code{.rodata}
+$\rightarrow$ the build pipeline (preprocess $\rightarrow$ compile $\rightarrow$
+assemble $\rightarrow$ link) $\rightarrow$ linker scripts (VMA/LMA)
+$\rightarrow$ startup code (what runs before \code{main}) $\rightarrow$
+Makefiles $\rightarrow$ diagnosing stack overflow and memory corruption.
+This is the chapter that explains \emph{where} the Chapter 1 keywords
+actually live: where a \code{static} ends up, why a \code{const} can sit in
+flash, and what zero-initialises your globals before \code{main}.
+\end{partnote}
+
+If Chapter 1 was the language, this is the machine the language runs on. An
+embedded interviewer asks these questions to find out whether you have ever
+debugged a board that ``runs in the debugger but not from reset'' --- the
+answer to which lives in the linker script and the startup code, not in your C.
+
+%=====================================================================
+\section{Primer}
+%=====================================================================
+
+\subsection{The memory map of an embedded program}
+
+A linked firmware image is divided into \emph{sections}, each with a purpose
+and a home:
+\begin{itemize}
+\item \code{.text} --- executable code and (usually) string literals. On an
+  MCU it lives in \textbf{flash} and runs in place.
+\item \code{.rodata} --- read-only data: \code{const} objects, literal tables,
+  lookup tables. Also in flash.
+\item \code{.data} --- initialised read/write globals/statics (e.g.\
+  \code{int g = 5;}). The \emph{values} are stored in flash; the
+  \emph{variables} live in RAM; startup copies flash $\rightarrow$ RAM.
+\item \code{.bss} --- zero-initialised read/write globals/statics (e.g.\
+  \code{int g;} or \code{static int s;}). Occupies RAM but \textbf{not} flash;
+  startup zeroes it.
+\item \textbf{stack} --- automatic (local) variables, return addresses, saved
+  registers; grows (on ARM/x86) from a high address downward.
+\item \textbf{heap} --- \code{malloc} territory; grows upward toward the stack.
+  Often unused or tightly bounded in flight software.
+\end{itemize}
+The single most useful mental model: \emph{flash holds the program and the
+initial values; RAM holds everything that changes; startup code bridges the
+two before \code{main} runs.}
+
+\subsection{The build pipeline}
+
+A C file becomes a running image in four stages:
+\begin{enumerate}
+\item \textbf{Preprocess} (\code{cpp}): expand \code{\#include}, \code{\#define},
+  and conditionals $\rightarrow$ a single translation unit of pure C.
+\item \textbf{Compile} (\code{cc1}): translation unit $\rightarrow$ assembly
+  for the target architecture.
+\item \textbf{Assemble} (\code{as}): assembly $\rightarrow$ an object file
+  (\code{.o}) of machine code plus a symbol table and unresolved references.
+\item \textbf{Link} (\code{ld}): combine object files and libraries, resolve
+  symbols, place sections at addresses per the \textbf{linker script}
+  $\rightarrow$ the final \code{.elf}. A separate step (\code{objcopy})
+  produces the raw \code{.bin}/\code{.hex} that gets flashed.
+\end{enumerate}
+Knowing which stage emits which error saves hours: a missing semicolon is a
+\emph{compile} error; ``undefined reference to \code{foo}'' is a \emph{link}
+error; ``\code{region FLASH overflowed}'' is a \emph{linker-script} error.
+
+\subsection{Startup code and the linker script}
+
+Between reset and \code{main} runs the \textbf{startup code} (often
+\code{startup.s} + a C \code{Reset\_Handler}). On a Cortex-M, the reset vector
+points at it; it (1) sets the stack pointer, (2) copies \code{.data} from its
+load address in flash (LMA) to its run address in RAM (VMA), (3) zeroes
+\code{.bss}, (4) runs C++ constructors / \code{init\_array}, then (5) calls
+\code{main}. The \textbf{linker script} (\code{.ld}) declares the memory
+regions (FLASH, RAM) and assigns sections to them, exporting the symbols
+(\code{\_etext}, \code{\_sdata}, \code{\_edata}, \code{\_sbss}, \code{\_ebss})
+that the startup code loops over. ``Works in debugger, fails from reset'' is
+almost always a startup/linker-script bug: the debugger loaded RAM for you;
+reset did not.
+
+%=====================================================================
+\section{Q\&A Bank}
+%=====================================================================
+
+\tierbanner{Tier 1 --- Screening (phone / HR-technical)}%
+{Two to four sentences. Segment and pipeline basics --- a stumble here signals
+no real board experience.}
+
+\question{Q2.1}{Name the main memory segments of a C program and what each
+holds.}
+\code{.text} holds code (and often literals) in flash; \code{.rodata} holds
+\code{const} read-only data in flash; \code{.data} holds initialised
+read/write globals in RAM; \code{.bss} holds zero-initialised globals in RAM;
+the \textbf{stack} holds locals and call frames; the \textbf{heap} serves
+\code{malloc}. Flash keeps what's fixed, RAM keeps what changes.
+
+\question{Q2.2}{Stack vs heap in one breath?}
+The stack is automatic, fast, LIFO storage for locals and return addresses,
+allocated and freed by the compiler as functions enter and exit; the heap is
+manually managed (\code{malloc}/\code{free}), flexible but slower,
+fragmentation-prone, and non-deterministic. On embedded the stack is small and
+fixed; the heap is often avoided entirely.
+
+\question{Q2.3}{What is the difference between \code{.data} and \code{.bss}?}
+\code{.data} is for globals/statics with a non-zero initialiser --- their
+initial values must be stored in flash and copied to RAM at startup.
+\code{.bss} is for globals/statics that are zero (or uninitialised) --- they
+take RAM but no flash, because startup just zeroes the region. So a big
+zero-filled array costs RAM but not image size.
+
+\question{Q2.4}{What are the four stages of building a C program?}
+Preprocessing (expand includes/macros), compilation (C $\rightarrow$
+assembly), assembly (assembly $\rightarrow$ object file), and linking (combine
+objects, resolve symbols, place sections $\rightarrow$ executable). On embedded
+a final \code{objcopy} turns the ELF into a flashable \code{.bin}/\code{.hex}.
+
+\question{Q2.5}{Where do a global variable and a local variable live?}
+A global (or any \code{static}) has static storage duration: it lives in
+\code{.data} or \code{.bss} for the whole program. A local has automatic
+storage duration: it lives on the stack and exists only while its function
+runs --- which is why returning the address of a local is a classic dangling
+pointer.
+
+\tierbanner{Tier 2 --- Core technical (panel round)}%
+{A short paragraph. The panel is checking you understand the path from reset
+to \code{main} and how to read the toolchain's output.}
+
+\question{Q2.6}{What runs before \code{main} on a bare-metal target?}
+The startup code, reached via the reset vector. It initialises the stack
+pointer, copies the \code{.data} section from its flash load address to its
+RAM run address, zeroes the \code{.bss} section, runs any static
+constructors / \code{init\_array} entries, and then calls \code{main}. If the
+\code{.data} copy or \code{.bss} zeroing is missing or misconfigured, globals
+hold garbage and the firmware misbehaves in ways that vanish under a debugger
+(which loads RAM for you).
+
+\question{Q2.7}{What is a linker script and what does it define?}
+It is the file (\code{.ld}) that tells the linker the target's memory map ---
+the address and size of each region (FLASH, RAM) --- and which output
+sections go where, in what order. It assigns each section a run address (VMA)
+and a load address (LMA), and exports boundary symbols (\code{\_sdata},
+\code{\_edata}, \code{\_sbss}, \code{\_ebss}, \code{\_etext}) that the startup
+code uses to copy \code{.data} and zero \code{.bss}. Get the region sizes
+wrong and you get ``region overflowed''; get the LMA/VMA wrong and globals
+don't initialise.
+
+\question{Q2.8}{Explain VMA vs LMA with \code{.data}.}
+The VMA (virtual/run address) is where a section is \emph{used} at run time;
+the LMA (load address) is where its initial contents are \emph{stored} in the
+image. For code in flash they're the same. For \code{.data} they differ: the
+variables run from RAM (VMA in RAM) but their initial values are stored in
+flash (LMA in flash), and startup copies LMA $\rightarrow$ VMA. That copy is
+exactly why an initialised global has the right value the instant \code{main}
+starts.
+
+\question{Q2.9}{Why is the heap discouraged in embedded/flight software ---
+from a memory-map view?}
+The heap grows toward the stack in a fixed RAM region, so a runaway allocation
+or fragmentation can collide with the stack (heap--stack collision) with no
+MMU to catch it. \code{malloc} timing is non-deterministic (breaks WCET
+analysis), fragmentation can fail an allocation despite enough total free
+memory, and there is rarely a safe in-flight recovery. The standard answer:
+allocate statically or from fixed-size pools at init, never in the control
+loop --- which is what the Coding Gym pool/arena allocators below implement.
+
+\question{Q2.10}{Declaration vs definition --- and what causes ``undefined
+reference'' vs ``multiple definition''?}
+A \emph{declaration} introduces a name and type (\code{extern int x;}); a
+\emph{definition} also allocates storage (\code{int x;}). ``Undefined
+reference'' is a \emph{link} error: something used a symbol that no object
+file defines (forgot to compile/link the \code{.c}, or only declared it).
+``Multiple definition'' is the opposite: two translation units each defined
+the same external symbol (e.g.\ a non-\code{static} global or a function body
+in a header). The fixes: put the single definition in one \code{.c} and
+\code{extern} declarations in the header; mark file-local helpers
+\code{static}; mark header inline functions \code{static inline}.
+
+\question{Q2.11}{How would you find out how much flash and RAM your firmware
+uses?}
+Two standard tools. \code{size firmware.elf} prints the \code{text}/\code{data}/
+\code{bss} totals --- flash usage is roughly \code{text + data}, RAM usage is
+roughly \code{data + bss} (plus runtime stack/heap). The linker \textbf{map
+file} (\code{-Wl,-Map=fw.map}) breaks it down per symbol and per section, so
+you can see which object or array is eating memory and confirm sections landed
+in the right regions. For static stack analysis you add tooling or the painting
+technique in Q3.14.
+
+\tierbanner{Tier 3 --- Trap \& depth (principal-engineer level)}%
+{A paragraph plus the trap. These separate ``I flash binaries'' from
+``I understand the image.''}
+
+\question{Q3.12}{A global reads as 0 before \code{main} in one build and as
+garbage in another. Explain.}
+Zero-initialised globals live in \code{.bss}, which the C standard guarantees
+is zero \emph{at program startup} --- but on bare metal that guarantee is only
+as good as the startup code that zeroes the \code{.bss} region. If the startup
+loop (or the linker symbols \code{\_sbss}/\code{\_ebss} it uses) is wrong or
+absent, \code{.bss} holds whatever was in RAM at power-on --- garbage --- and
+the bug appears only when running from reset, not under a debugger that
+cleared RAM. \trap the candidate who says ``globals are always zero'' has never
+brought up a board. The defensible answer names \code{.bss}, the startup
+zeroing loop, and the debugger-vs-reset discrepancy --- the same class of
+issue as the BEL ``works in the lab rig, fails on the unit'' defects.
+
+\question{Q3.13}{Differentiate a stack overflow from heap corruption: cause,
+symptom, and detection on a target without an MMU.}
+A \emph{stack overflow} is the stack growing past its allotted RAM --- from
+deep recursion, large local arrays, VLAs, or an ISR storm --- overwriting
+adjacent memory (often \code{.bss}/\code{.data} or the heap), so unrelated
+globals mysteriously change. \emph{Heap corruption} is writing outside an
+allocated block or double-/use-after-free, which smashes allocator metadata and
+typically faults on a later \code{malloc}/\code{free}, far from the real bug.
+Detection without an MMU: a \textbf{stack canary/guard word} at the stack
+limit (trip if it changes), \textbf{painting} the stack with a known pattern
+and measuring the high-water mark, an \textbf{MPU} region marking the stack
+guard no-access (faults on overflow), and \textbf{red-zone guard bytes} around
+heap blocks. \trap juniors say ``it crashes.'' Seniors name the \emph{distance}
+between corruption and symptom --- the reason these bugs are hard --- and give
+a concrete detection mechanism for each. (Both are built in the Coding Gym.)
+
+\question{Q3.14}{How do you measure worst-case stack usage on a deployed
+embedded system?}
+Two complementary methods. \textbf{Static}: compiler stack-usage output
+(\code{-fstack-usage}) plus call-graph analysis gives a worst-case bound
+\emph{except} through function pointers and recursion, which must be bounded by
+hand. \textbf{Runtime ``painting''}: fill the whole stack region with a known
+sentinel (e.g.\ \code{0xCD}) at startup, run the worst-case workload, then scan
+from the far end for the first untouched sentinel --- the distance is the
+high-water mark, and the remaining unpainted margin is your headroom. \trap the
+trap is trusting a single test run; you must drive the genuine worst case
+(deepest call path \emph{with} the highest-priority ISR nested on top) before
+the number means anything. RTOSes expose this as ``stack high-water mark'' per
+task --- implemented exactly as the painting problem below.
+
+\question{Q3.15}{Walk the linker through resolving \code{int counter;} defined
+in two \code{.c} files vs declared \code{extern} in a header --- why one links
+and one doesn't.}
+\code{extern int counter;} in a shared header is a \emph{declaration}: every
+file that includes it knows the symbol's type but allocates nothing, and the
+linker binds them all to the one real definition. \code{int counter;} placed
+in the header instead becomes a \emph{tentative definition} in every including
+file; with the traditional ``common symbol'' model the linker merged them, but
+modern toolchains (GCC 10+, \code{-fno-common} by default) treat them as
+multiple definitions and reject the link --- which is the correct, safe
+behaviour. \trap the depth here is tentative definitions and \code{-fno-common}:
+the historically-``working'' header-with-a-bare-global pattern is now a link
+error, and the fix is the disciplined \code{extern}-in-header /
+definition-in-one-\code{.c} split. Mark truly file-local state \code{static} so
+it never participates in linking at all.
+
+%=====================================================================
+\section{Coding Gym}
+%=====================================================================
+
+\begin{partnote}
+Memory/toolchain concepts are best learned by building the structures the
+linker and allocator would otherwise hide. Every solution compiles clean under
+\code{gcc -Wall -Wextra -std=c11}; the allocators and guards are the real
+patterns used in flight-grade firmware that bans \code{malloc}.
+\end{partnote}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Map the segments --- which variable lives where}
+
+\textbf{Problem.} Write a program that takes the addresses of an initialised
+global, an uninitialised global, a \code{const}, a function, a local, and a
+heap block, and prints them. Predict their relative ordering and name each
+segment.
+
+\textbf{Hints.}
+\begin{itemize}
+\item \code{\&g\_init} is \code{.data}; \code{\&g\_uninit} is \code{.bss};
+  \code{\&g\_const} is \code{.rodata}; \code{main} is \code{.text}.
+\item Stack addresses are typically high; heap addresses sit above the static
+  data. Exact values vary per platform.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+#include <stdlib.h>
+
+int g_init = 5;                 /* .data   : initialised global  */
+int g_uninit;                   /* .bss    : zero-init global     */
+const int g_const = 7;          /* .rodata : read-only constant   */
+int counter(void) { static int s; return ++s; }  /* static local -> .bss */
+
+int main(void) {
+    int local = 1;                          /* stack */
+    int *heap = malloc(sizeof *heap);       /* heap  */
+    if (!heap) return 1;
+    *heap = 2;
+    printf("data@%p bss@%p ro@%p text@%p stack@%p heap@%p\n",
+           (void*)&g_init, (void*)&g_uninit, (void*)&g_const,
+           (void*)(void(*)(void))main, (void*)&local, (void*)heap);
+    printf("vals: %d %d %d %d %d %d\n",
+           g_init, g_uninit, g_const, counter(), local, *heap);
+    free(heap);
+    return 0;
+}
+\end{cgym}
+
+The \emph{values} are deterministic (\code{5 0 7 1 1 2}) --- note
+\code{g\_uninit} and the \code{static s} both start at 0 because they're in
+\code{.bss}. The \emph{addresses} vary by platform, but the ordering is
+instructive: code and \code{.rodata} lowest (flash on an MCU), then
+\code{.data}/\code{.bss}, then the heap growing up, and the stack high and
+growing down.
+
+\followups
+\begin{enumerate}
+\item \emph{``On an MCU, which of these are in flash vs RAM?''} $\rightarrow$
+  \code{.text}/\code{.rodata}/the \code{.data} \emph{initialisers} in flash;
+  \code{.data}/\code{.bss}/stack/heap in RAM.
+\item \emph{``Why is \code{g\_uninit} zero without you writing 0?''}
+  $\rightarrow$ \code{.bss} is zeroed by startup code before \code{main}.
+\item \emph{``Move \code{g\_uninit} into \code{.data} --- how?''} $\rightarrow$
+  Give it a non-zero initialiser; now its value costs flash.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Which way does the stack grow?}
+
+\textbf{Problem.} Determine at runtime whether the stack grows toward lower or
+higher addresses.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Compare the address of a local in a callee against one from the caller.
+\item A lower callee address means the stack grows downward.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+static int grows_down(int *parent_local) {
+    int child_local;
+    return (&child_local < parent_local);  /* callee frame below caller? */
+}
+
+int main(void) {
+    int top;
+    printf("stack grows %s\n", grows_down(&top) ? "down" : "up");
+    return 0;
+}
+\end{cgym}
+
+On ARM and x86 this prints ``down'': each call places its frame at a lower
+address. (Strictly, comparing pointers into different frames is outside what
+the standard defines, so this is a practical probe, not portable contract ---
+say so if asked.) Why it matters: stack-overflow guards and MPU stack-limit
+regions are placed at the \emph{low} end on a downward stack, and a deep call
+chain or big local array marches toward that limit.
+
+\followups
+\begin{enumerate}
+\item \emph{``Where do you put the stack guard, given the direction?''}
+  $\rightarrow$ At the lowest stack address (the limit it grows toward).
+\item \emph{``Why is this technically UB?''} $\rightarrow$ Relational
+  comparison of pointers into different objects/frames is unspecified; use a
+  documented stack-limit symbol on a real target.
+\item \emph{``How does an ARM Cortex-M signal the stack limit in hardware?''}
+  $\rightarrow$ \code{PSPLIM}/\code{MSPLIM} registers (ARMv8-M) or an MPU
+  guard region.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Fixed-block pool allocator (the \code{malloc} replacement)}
+
+\textbf{Problem.} Implement \code{pool\_alloc}/\code{pool\_free} over a static
+array of fixed-size blocks --- deterministic, no fragmentation.
+
+\textbf{Hints.}
+\begin{itemize}
+\item A parallel \code{used[]} flag array tracks occupancy.
+\item Allocation returns the first free block; free clears its flag.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+#include <stdint.h>
+#include <stddef.h>
+
+#define BLOCK_SIZE 32
+#define NUM_BLOCKS 4
+static uint8_t pool[NUM_BLOCKS][BLOCK_SIZE];
+static uint8_t used[NUM_BLOCKS];
+
+void *pool_alloc(void) {
+    for (int i = 0; i < NUM_BLOCKS; i++)
+        if (!used[i]) { used[i] = 1; return pool[i]; }
+    return NULL;                       /* pool exhausted -> caller handles it */
+}
+void pool_free(void *p) {
+    for (int i = 0; i < NUM_BLOCKS; i++)
+        if (p == pool[i]) { used[i] = 0; return; }
+}
+
+int main(void) {
+    void *a = pool_alloc(), *b = pool_alloc();
+    pool_free(a);
+    void *c = pool_alloc();            /* reuses a's block */
+    printf("reused=%d b=%d\n", c == a, b != NULL);   /* reused=1 b=1 */
+    return 0;
+}
+\end{cgym}
+
+Every allocation is the same size and either succeeds or returns \code{NULL} ---
+no fragmentation, bounded time, fully static RAM. This is the canonical pattern
+for message buffers, CAN frames, or task control blocks in a system that bans
+\code{malloc}. The \code{free}-list version (problem 8) makes alloc/free O(1).
+
+\followups
+\begin{enumerate}
+\item \emph{``Make allocation O(1).''} $\rightarrow$ Keep a free list of block
+  indices/pointers instead of scanning \code{used[]} --- see problem 8.
+\item \emph{``How do you make it ISR-safe?''} $\rightarrow$ Brief critical
+  section (disable interrupts) around the flag update, or a lock-free index
+  stack.
+\item \emph{``How do you detect a double free here?''} $\rightarrow$ Check the
+  flag is set before clearing; flag a fault if freeing an already-free block.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Bump / arena allocator with alignment}
+
+\textbf{Problem.} Implement \code{arena\_alloc(size, align)} that hands out
+aligned chunks from a static buffer by advancing an offset.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Round the current offset up to \code{align} before carving.
+\item \code{align\_up(n, a) = (n + (a-1)) \& \textasciitilde(a-1)} for
+  power-of-two \code{a}.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+#include <stdint.h>
+#include <stddef.h>
+
+static uint8_t arena[256];
+static size_t  a_off = 0;
+
+static size_t align_up(size_t n, size_t a) {
+    return (n + (a - 1)) & ~(a - 1);     /* a must be a power of two */
+}
+void *arena_alloc(size_t size, size_t align) {
+    size_t cur = align_up(a_off, align);
+    if (cur + size > sizeof arena) return NULL;   /* out of arena */
+    a_off = cur + size;
+    return &arena[cur];
+}
+
+int main(void) {
+    char     *p = arena_alloc(10, 1);
+    uint32_t *q = arena_alloc(sizeof(uint32_t), 4);
+    printf("p=%d q_aligned=%d\n", p != NULL, ((uintptr_t)q % 4u) == 0);
+    return 0;
+}
+\end{cgym}
+
+A bump allocator is the fastest possible allocator --- one add per allocation
+--- and never fragments \emph{during} a run because it only moves forward. The
+catch is you cannot free individual objects; you reclaim the whole region at
+once (problem 12). Alignment matters because an unaligned \code{uint32\_t}
+access faults or is slow on some cores --- the same alignment discipline behind
+DMA buffers.
+
+\followups
+\begin{enumerate}
+\item \emph{``Why must \code{align} be a power of two?''} $\rightarrow$ The
+  \code{\& \textasciitilde(a-1)} mask only rounds correctly for powers of two.
+\item \emph{``How do you free?''} $\rightarrow$ You don't free individually;
+  reset the offset (region/arena reset) --- problem 12.
+\item \emph{``Align a DMA buffer to 32 bytes --- change what?''} $\rightarrow$
+  Pass \code{align = 32}; also ensure the arena itself is suitably aligned.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Pointer alignment check before a word access}
+
+\textbf{Problem.} Write \code{is\_aligned(p, a)} returning true when pointer
+\code{p} meets alignment \code{a} (a power of two).
+
+\textbf{Hints.}
+\begin{itemize}
+\item Cast to \code{uintptr\_t} and mask the low bits.
+\item \code{(addr \& (a-1)) == 0} means aligned.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+#include <stdint.h>
+#include <stddef.h>
+
+static int is_aligned(const void *p, size_t a) {
+    return ((uintptr_t)p & (a - 1)) == 0;   /* a must be a power of two */
+}
+
+int main(void) {
+    uint32_t x = 0;
+    uint8_t  buf[8] = {0};
+    printf("x=%d misaligned=%d\n",
+           is_aligned(&x, 4),        /* a uint32_t is 4-aligned -> 1 */
+           is_aligned(buf + 1, 4));  /* odd offset -> 0              */
+    return 0;
+}
+\end{cgym}
+
+\code{uintptr\_t} is the integer type guaranteed to hold a pointer, so the
+mask is well defined. Alignment checks guard the fast path: before a
+word-at-a-time \code{memcpy}, before casting a byte buffer to a
+\code{uint32\_t*}, and before handing a buffer to DMA --- on a Cortex-M0 or
+older ARM an unaligned 32-bit access is a fault, not a slowdown.
+
+\followups
+\begin{enumerate}
+\item \emph{``Round a pointer up to alignment.''} $\rightarrow$
+  \code{(uint8\_t*)(((uintptr\_t)p + (a-1)) \& \textasciitilde(a-1))}.
+\item \emph{``Why \code{uintptr\_t} not \code{int}?''} $\rightarrow$ An
+  \code{int} may be narrower than a pointer; the cast would lose bits.
+\item \emph{``Where does unaligned access actually fault?''} $\rightarrow$
+  Cortex-M0/M0+/M1 and classic ARM for 32-bit loads; M3/M4 allow it for normal
+  loads but not for \code{LDM}/\code{STM} or strongly-ordered memory.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Red-zone guard bytes --- detect a buffer overrun}
+
+\textbf{Problem.} Wrap a buffer in known guard words and provide a check that
+reports whether anything wrote past its bounds.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Put a sentinel before and after the data inside one struct (layout is
+  then deterministic).
+\item Verify both sentinels are intact.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+#include <string.h>
+#include <stdint.h>
+
+#define GUARD 0xA5A5A5A5u
+typedef struct {
+    uint32_t front;        /* red zone before the data */
+    uint8_t  data[16];
+    uint32_t back;         /* red zone after the data  */
+} guarded_t;
+
+static void guarded_init(guarded_t *g) { g->front = GUARD; g->back = GUARD; }
+static int  guarded_ok(const guarded_t *g) {
+    return g->front == GUARD && g->back == GUARD;
+}
+
+int main(void) {
+    guarded_t g;
+    guarded_init(&g);
+    memcpy(g.data, "safe", 5);          /* within bounds */
+    printf("intact=%d\n", guarded_ok(&g));   /* intact=1 */
+    return 0;
+}
+\end{cgym}
+
+A write of more than 16 bytes into \code{data} would clobber \code{back}, and
+\code{guarded\_ok} would return false --- turning silent corruption into a
+detectable event you can assert on. Embedding the guards in a struct makes the
+layout deterministic (unlike a loose canary next to a stack array, which the
+compiler may reorder). This is the debugging-allocator / ``electric fence''
+idea in miniature.
+
+\followups
+\begin{enumerate}
+\item \emph{``How would a real heap debugger use this?''} $\rightarrow$ Pad
+  every allocation with guard bytes and check them on \code{free}.
+\item \emph{``Why guards inside a struct, not separate variables?''}
+  $\rightarrow$ The compiler can reorder/realign separate locals; struct member
+  order is fixed.
+\item \emph{``What's the runtime cost, and when do you compile it out?''}
+  $\rightarrow$ Extra RAM + check time; gate behind a \code{DEBUG} build.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Model the startup code --- copy \code{.data}, zero
+\code{.bss}}
+
+\textbf{Problem.} Using arrays to stand in for the linker-defined regions,
+write the two loops the startup code runs before \code{main}: copy the
+\code{.data} initialisers from ``flash'' to ``RAM'' and zero the \code{.bss}.
+
+\textbf{Hints.}
+\begin{itemize}
+\item One ``flash'' array holds the initial values (LMA); one ``RAM'' array is
+  the live \code{.data} (VMA).
+\item \code{.bss} is just \code{memset} to 0.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+#include <string.h>
+#include <stdint.h>
+
+static uint8_t flash_data_init[4] = { 1, 2, 3, 4 };  /* LMA: init values in flash */
+static uint8_t ram_data[4];                           /* VMA: live .data in RAM    */
+static uint8_t ram_bss[4]  = { 9, 9, 9, 9 };          /* stand-in for .bss memory  */
+
+static void startup_copy_data(void) {                 /* the .data copy loop */
+    memcpy(ram_data, flash_data_init, sizeof ram_data);
+}
+static void startup_zero_bss(void) {                  /* the .bss zero loop  */
+    memset(ram_bss, 0, sizeof ram_bss);
+}
+
+int main(void) {
+    startup_copy_data();
+    startup_zero_bss();
+    printf("data=%d%d%d%d bss=%d%d%d%d\n",            /* data=1234 bss=0000 */
+           ram_data[0], ram_data[1], ram_data[2], ram_data[3],
+           ram_bss[0], ram_bss[1], ram_bss[2], ram_bss[3]);
+    return 0;
+}
+\end{cgym}
+
+On real hardware the bounds of these loops are the linker symbols
+(\code{\_sdata}/\code{\_edata}/\code{\_etext} for the copy,
+\code{\_sbss}/\code{\_ebss} for the zero), and this runs in
+\code{Reset\_Handler} before \code{main}. Comment out
+\code{startup\_zero\_bss} and \code{ram\_bss} keeps its old contents
+(\code{9999}) --- exactly the ``globals hold garbage from reset'' failure of
+Q3.12.
+
+\followups
+\begin{enumerate}
+\item \emph{``Which linker symbols bound these loops?''} $\rightarrow$
+  \code{\_sdata}/\code{\_edata}/\code{\_etext} and \code{\_sbss}/\code{\_ebss}.
+\item \emph{``Why copy \code{.data} at all --- why not run from flash?''}
+  $\rightarrow$ It's read/write; flash isn't freely writable, so live
+  variables must be in RAM.
+\item \emph{``What else runs before \code{main} in C++?''} $\rightarrow$
+  Static constructors via \code{\_\_libc\_init\_array} / \code{init\_array}.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{O(1) free-list allocator}
+
+\textbf{Problem.} Build a fixed-block allocator whose \code{alloc} and
+\code{free} are both O(1) by threading a singly-linked free list through the
+blocks themselves.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Each free block stores a \code{next} pointer (the block memory doubles as
+  list storage).
+\item \code{alloc} pops the head; \code{free} pushes onto the head.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+#include <stddef.h>
+
+#define N 4
+typedef struct block { struct block *next; } block_t;
+static block_t  storage[N];
+static block_t *free_list;
+
+static void fl_init(void) {
+    free_list = NULL;
+    for (int i = 0; i < N; i++) {        /* push every block onto the list */
+        storage[i].next = free_list;
+        free_list = &storage[i];
+    }
+}
+static void *fl_alloc(void) {            /* pop the head -- O(1) */
+    if (!free_list) return NULL;
+    block_t *b = free_list;
+    free_list = b->next;
+    return b;
+}
+static void fl_free(void *p) {           /* push onto the head -- O(1) */
+    block_t *b = p;
+    b->next = free_list;
+    free_list = b;
+}
+
+int main(void) {
+    fl_init();
+    void *a = fl_alloc(), *b = fl_alloc();
+    fl_free(a);
+    void *c = fl_alloc();
+    printf("reused=%d b=%d\n", c == a, b != NULL);   /* reused=1 b=1 */
+    return 0;
+}
+\end{cgym}
+
+The trick is that a \emph{free} block holds no user data, so its bytes can store
+the \code{next} link --- the free list costs no extra memory. Both operations
+are a couple of pointer moves, fully deterministic. This is how RTOS memory
+pools and many lock-free allocators work; the same intrusive-list idea recovers
+its parent via \code{container\_of} (Chapter 1).
+
+\followups
+\begin{enumerate}
+\item \emph{``Make it lock-free for ISR use.''} $\rightarrow$ A compare-and-swap
+  on the list head (ABA-aware) or a brief interrupt disable.
+\item \emph{``Block size must hold a pointer --- implication?''} $\rightarrow$
+  Minimum block size is \code{sizeof(void*)}; tiny objects waste space, so size
+  pools to your message types.
+\item \emph{``Detect freeing a pointer that isn't ours.''} $\rightarrow$
+  Range-check \code{p} against \code{storage} bounds and block alignment.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Stack high-water mark by painting}
+
+\textbf{Problem.} Implement the RTOS ``stack painting'' technique: fill a
+stack region with a sentinel, then later report how many bytes were actually
+used.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Paint the whole region with a constant (e.g.\ \code{0xCD}).
+\item Usage = region size minus the count of untouched sentinel bytes from the
+  far end.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+#include <stdint.h>
+#include <string.h>
+
+#define STK   256
+#define PAINT 0xCD
+static uint8_t fake_stack[STK];
+
+static void   paint(void) { memset(fake_stack, PAINT, STK); }
+static size_t high_water(void) {
+    for (size_t i = 0; i < STK; i++)        /* scan from the growth limit up */
+        if (fake_stack[i] != PAINT)
+            return STK - i;                 /* first touched byte -> usage   */
+    return 0;
+}
+
+int main(void) {
+    paint();
+    /* simulate the stack being used from the top (high addresses) down */
+    fake_stack[STK - 1] = 1;
+    fake_stack[STK - 2] = 2;
+    fake_stack[STK - 10] = 3;               /* deepest touch */
+    printf("high_water=%zu\n", high_water());   /* high_water=10 */
+    return 0;
+}
+\end{cgym}
+
+Because a downward stack is used from the high end, the deepest byte ever
+written is the high-water mark; scanning from the low (limit) end, the first
+non-sentinel byte tells you how close the worst case came to the guard.
+Subtracting from \code{STK} gives bytes used (10 here) and the untouched
+remainder is your safety margin. This is literally how
+\code{uxTaskGetStackHighWaterMark}-style APIs work.
+
+\followups
+\begin{enumerate}
+\item \emph{``Why can this under-report?''} $\rightarrow$ If real data happened
+  to equal the sentinel, or the true worst case never ran --- drive the genuine
+  worst path.
+\item \emph{``What sentinel value is safe?''} $\rightarrow$ One unlikely in
+  real data (\code{0xCD}/\code{0xA5}); some RTOSes use \code{0xA5A5A5A5}.
+\item \emph{``Combine with a hard guard.''} $\rightarrow$ An MPU no-access
+  region or \code{MSPLIM} at the limit catches the overflow the instant it
+  happens, not after the fact.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Overflow-safe bounded string copy (\code{strlcpy}-style)}
+
+\textbf{Problem.} Copy a C string into a fixed destination buffer, never
+overflowing it, always NUL-terminating, and reporting whether truncation
+happened.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Copy at most \code{dstsize - 1} bytes, then terminate.
+\item Return the source length so the caller can detect truncation
+  (\code{return >= dstsize}).
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+#include <stddef.h>
+
+static size_t safe_copy(char *dst, const char *src, size_t dstsize) {
+    size_t i = 0;
+    if (dstsize > 0) {
+        for (; i + 1 < dstsize && src[i]; i++)   /* leave room for NUL */
+            dst[i] = src[i];
+        dst[i] = '\0';                           /* always terminate   */
+    }
+    size_t srclen = i;
+    while (src[srclen]) srclen++;                /* measure full source */
+    return srclen;                               /* >= dstsize => truncated */
+}
+
+int main(void) {
+    char buf[8];
+    size_t need = safe_copy(buf, "abcdefghij", sizeof buf);
+    printf("[%s] need=%zu truncated=%d\n",
+           buf, need, need >= sizeof buf);        /* [abcdefg] need=10 truncated=1 */
+    return 0;
+}
+\end{cgym}
+
+Unlike \code{strcpy} (no bound $\rightarrow$ overflow) and \code{strncpy}
+(may leave the result un-terminated and pads with NULs), this always
+terminates and tells you if the source didn't fit --- so a too-long packet
+field or filename truncates safely instead of smashing the next variable. Buffer
+overflow of exactly this kind is the root of a huge fraction of embedded memory
+corruption.
+
+\followups
+\begin{enumerate}
+\item \emph{``Why is \code{strncpy} not a safe drop-in?''} $\rightarrow$ It
+  doesn't NUL-terminate when the source fills the buffer, and zero-pads the
+  rest --- two surprises.
+\item \emph{``What does the caller do on truncation?''} $\rightarrow$ Treat
+  \code{>= dstsize} as an error (reject the input / log it), not silently
+  continue.
+\item \emph{``Make it copy into the middle of a buffer safely.''}
+  $\rightarrow$ Pass the remaining space \code{dstsize - offset}; never trust
+  the source length.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Static memory budgeting with \code{sizeof}}
+
+\textbf{Problem.} A driver keeps four port contexts. Compute the static RAM
+footprint at compile time and explain the number.
+
+\textbf{Hints.}
+\begin{itemize}
+\item \code{sizeof} the struct, then the array.
+\item Watch for padding from the trailing \code{uint16\_t}.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+#include <stdint.h>
+
+typedef struct {
+    uint8_t  rx[64];
+    uint8_t  tx[64];
+    uint16_t flags;
+} port_t;
+
+int main(void) {
+    port_t ports[4];
+    printf("one=%zu all=%zu\n", sizeof(port_t), sizeof ports);  /* one=130 all=520 */
+    return 0;
+}
+\end{cgym}
+
+\code{one = 130}: 64 + 64 + 2, with no padding because \code{flags} (a
+\code{uint16\_t}, alignment 2) already lands at an even offset (128) and 130 is
+a multiple of the struct's alignment (2). \code{all = 520} = 4 $\times$ 130 of
+fixed, statically-known RAM --- the kind of number you put in a memory budget
+and check against the linker \code{.map}, instead of discovering it at run time
+via the heap. (Reorder or add a wider member and padding can change this ---
+revisit Chapter 1's padding rules.)
+
+\followups
+\begin{enumerate}
+\item \emph{``Add a \code{uint32\_t} field --- predict the new size.''}
+  $\rightarrow$ Alignment to 4 may add tail padding; compute it, then confirm
+  with \code{sizeof}.
+\item \emph{``Where do these 520 bytes show up in the build?''} $\rightarrow$
+  In \code{.bss} (uninitialised) of the \code{size}/\code{.map} output ---
+  RAM, not flash.
+\item \emph{``Why prefer this over \code{malloc(4 * sizeof(port\_t))}?''}
+  $\rightarrow$ Known at link time, no fragmentation, no failure path,
+  analysable for certification.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Region allocator with checkpoint / rewind (free-all)}
+
+\textbf{Problem.} Extend the bump allocator with \code{mark} and
+\code{release} so a caller can allocate scratch space and free it all in O(1)
+--- the per-frame ``scratch arena'' pattern.
+
+\textbf{Hints.}
+\begin{itemize}
+\item \code{mark} captures the current offset; \code{release} restores it.
+\item All allocations after a mark vanish together.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+#include <stdint.h>
+#include <stddef.h>
+
+static uint8_t scratch[128];
+static size_t  sp = 0;
+
+static size_t arena_mark(void)            { return sp; }     /* checkpoint */
+static void   arena_release(size_t mark)  { sp = mark; }     /* free-all to mark */
+static void  *scratch_alloc(size_t n) {
+    if (sp + n > sizeof scratch) return NULL;
+    void *p = &scratch[sp];
+    sp += n;
+    return p;
+}
+
+int main(void) {
+    size_t m = arena_mark();
+    scratch_alloc(40);
+    scratch_alloc(20);
+    arena_release(m);                     /* release both allocations at once */
+    printf("after_release=%zu\n", arena_mark());   /* after_release=0 */
+    return 0;
+}
+\end{cgym}
+
+This is region-based memory management: you allocate freely within a phase
+(parsing a packet, building one control-loop frame), then drop the whole region
+in a single assignment. No per-object free, no fragmentation, no leaks possible
+within the region --- ideal for transient scratch in a real-time loop where
+\code{malloc}/\code{free} are banned. The cost is discipline: nothing allocated
+after a \code{mark} may outlive the matching \code{release}.
+
+\followups
+\begin{enumerate}
+\item \emph{``What breaks if a pointer escapes past \code{release}?''}
+  $\rightarrow$ It dangles --- the bytes get reused by the next allocation;
+  region allocators trade safety for speed.
+\item \emph{``Nest marks?''} $\rightarrow$ Yes --- marks form a stack
+  (LIFO), so inner regions release before outer.
+\item \emph{``Compare to the pool allocator.''} $\rightarrow$ Pool = many
+  same-size objects with individual free; arena = mixed sizes, bulk free.
+\end{enumerate}
+\end{gymproblem}
+
+%=====================================================================
+\section{Link to Her Resume}
+%=====================================================================
+
+\begin{resumelink}
+\textbf{Startup / board bring-up:} ``Board bring-up is exactly where the
+memory map stops being theory --- the difference between code that runs under
+the debugger and code that runs from reset is whether the startup code copied
+\code{.data} and zeroed \code{.bss} correctly. That's the first thing I'd check
+on a board that boots in the lab rig but not standalone.''
+
+\medskip
+\textbf{Static memory / no-\code{malloc} discipline:} ``Flight-grade firmware
+avoids the heap, so buffers come from static pools and arenas sized at link
+time. I can read a \code{.map} file and a \code{size} output to confirm flash
+and RAM budgets rather than discovering limits at run time.''
+
+\medskip
+\textbf{Corruption diagnosis:} ``The hard timing and integration defects I
+worked on at BEL are the same family as stack-overflow and buffer-overrun bugs
+--- the corruption shows up far from its cause. I reach for guard words, stack
+painting, and the \code{.map} file to localise them.''
+
+\medskip
+\small Maps to concrete resume lines: TASL board bring-up across autopilot
+generations, BEL HSI timing-defect resolution, and the deterministic,
+analysable footprint that safety-critical work demands. Keep claims to what the
+resume states; the deep project scripting is Chapter 15, from
+\code{inputs/INTAKE.md} only.
+\end{resumelink}
+
+%=====================================================================
+\section{Self-Test Scorecard}
+%=====================================================================
+
+\begin{scorecard}
+\begin{enumerate}
+\item Name the six places data lives in a running C program and one example of
+  each.
+\item Which segment costs flash but not RAM, and which costs RAM but not flash?
+\item List the four build stages and the tool for each.
+\item What three things does the startup code do before \code{main}?
+\item Define VMA vs LMA using \code{.data}.
+\item What does a linker script define, and name two boundary symbols it
+  exports.
+\item ``Undefined reference'' vs ``multiple definition'' --- which stage, and a
+  cause of each.
+\item A global is 0 under the debugger but garbage from reset --- what's wrong?
+\item Name two ways to detect a stack overflow on an MMU-less target.
+\item Why is a fixed-block pool or arena preferred over \code{malloc} in flight
+  software?
+\end{enumerate}
+\end{scorecard}
+
+\begin{answerkey}
+\begin{enumerate}
+\item \code{.text} (code), \code{.rodata} (\code{const}), \code{.data}
+  (\code{int g=5}), \code{.bss} (\code{int g;}), stack (locals), heap
+  (\code{malloc}).
+\item \code{.bss} costs RAM but not flash (it's just zeroed); the \code{.data}
+  \emph{initialisers} cost flash, and \code{.data} costs RAM too. (Pure code
+  costs flash but not RAM.)
+\item Preprocess (\code{cpp}), compile (\code{cc1}), assemble (\code{as}),
+  link (\code{ld}).
+\item Set the stack pointer, copy \code{.data} flash$\rightarrow$RAM, zero
+  \code{.bss} (then run constructors, call \code{main}).
+\item VMA = run address (where \code{.data} lives in RAM); LMA = load address
+  (where its init values sit in flash); startup copies LMA$\rightarrow$VMA.
+\item The memory regions and section placement (addresses/sizes); exports e.g.\
+  \code{\_sdata}, \code{\_edata}, \code{\_sbss}, \code{\_ebss}, \code{\_etext}.
+\item Both are \emph{link}-stage. Undefined reference: symbol used but never
+  defined/linked. Multiple definition: same external symbol defined in two
+  translation units.
+\item The startup \code{.bss} zeroing is missing/misconfigured (or its linker
+  symbols are wrong); the debugger cleared RAM, reset did not.
+\item Any two of: stack canary/guard word, stack painting + high-water scan,
+  MPU guard region, \code{MSPLIM}/\code{PSPLIM} stack-limit registers.
+\item Deterministic timing, no fragmentation, statically-known and
+  link-time-analysable footprint, and no in-flight allocation-failure path ---
+  required for certification.
+\end{enumerate}
+\end{answerkey}
+
+\begin{partnote}
+\emph{End of Chapter 2.} Next: \textbf{ARM \& MCU Architecture} --- the
+Cortex-M register set, exception model and NVIC, clock tree, GPIO internals,
+and the LPC3250/ARM9 specifics behind the BEL platform, where this memory map
+is wired to real silicon.
+\end{partnote}
