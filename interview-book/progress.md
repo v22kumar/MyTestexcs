@@ -35,13 +35,13 @@ matter) on top of chapter content.
 | 11 | ch11_debugging_lab.tex | Hardware Debugging & Lab Skills | 30 | ~8 | [x] full topic scope |
 | 12 | ch12_vnv_do178.tex | V&V, DO-178B & Test Methodology | 30 | ~9 | [x] full topic scope |
 | 13 | ch13_coding_gym.tex | 60 Embedded C Problems | 60 | ~13 | [x] all 60 verified |
-| 14 | ch14_python_automation.tex | Python for Test Automation | 25 | — | [ ] |
-| 15 | ch15_project_deepdives.tex | Her Project Deep-Dives | 25 | — | [ ] **BLOCKED — see note** |
-| 16 | ch16_behavioral_company.tex | Behavioral & Company Rounds | 20 | — | [ ] **BLOCKED — see note** |
-| 17 | ch17_mock_interviews.tex | 5 Full Mock Interviews | 20 | — | [ ] |
+| 14 | ch14_python_automation.tex | Python for Test Automation | 25 | ~8 | [x] full topic scope |
+| 15 | ch15_project_deepdives.tex | Her Project Deep-Dives | 25 | ~2 | [~] SKELETON ([NEEDS INTAKE] placeholders); BLOCKED on INTAKE.md |
+| 16 | ch16_behavioral_company.tex | Behavioral & Company Rounds | 20 | ~3 | [~] SKELETON (company one-pagers done; personal STAR [NEEDS INTAKE]); BLOCKED on INTAKE.md |
+| 17 | ch17_mock_interviews.tex | 5 Full Mock Interviews | 20 | ~7 | [x] full topic scope |
 
-**Current compiled size:** `build/book.pdf` = **169 pages** (title + TOC +
-Chapters 1–13), of the ~520 target.
+**Current compiled size:** `build/book.pdf` = **186 pages** (title + TOC +
+Chapters 1–17; Ch 15-16 are skeletons gated on INTAKE.md).
 
 ## Session log
 
@@ -246,6 +246,27 @@ to approach budget without filler.
   bank; teaching format reserved for Ch 1-12.
 - Compiled clean: 169 pp, zero LaTeX warnings (wrapped 2 long code signatures,
   reworded 2 long inline-code notes).
+
+### Session 15 — Chapters 14, 17, and 15/16 skeletons — book structurally COMPLETE
+- **Ch 14 (Python for Test Automation):** struct pack/unpack, pyserial, regex log
+  parsing, CSV/report generation, 15 Python problems. All pure-logic snippets run
+  under python3; CRC-16 matches the C version (0x5BCE). Added a Python listing
+  style (pygym) to interviewbook.sty.
+- **Ch 17 (5 Full Mock Interviews):** screening, technical-1 (C+protocols),
+  technical-2 (domain+projects), coding, managerial -- each with question
+  script, scoring rubric, answer key (cross-referenced), and common-mistake
+  notes, plus a readiness gate. No new code.
+- **Ch 15 & 16 SKELETONS (gated):** per PLAN.md Section 5 / CLAUDE.md, written as
+  structure-only with [NEEDS INTAKE: ...] markers and NO fabricated project or
+  biographical facts. Ch 16's company one-pagers (general public knowledge) are
+  filled; all personal STAR/logistics are [NEEDS INTAKE]. Numbering stays correct
+  (15/16/17) because the skeletons occupy their slots.
+- Compiled clean: **186 pp, zero LaTeX warnings**, full 17-chapter book.
+
+### GATE STILL OPEN — Chapters 15 & 16
+- inputs/INTAKE.md REQUIRED fields remain unfilled. Ch 15 lists 13 [NEEDS INTAKE]
+  questions (Q1-Q13); Ch 16 lists 9 (B1-B9). Fill these, then 15/16 are generated
+  in full and the claim-vs-resume consistency check (PLAN.md 5.4) can run.
 
 ## Open flags / [VERIFY] / [NEEDS INTAKE] items
 - **Chapters 15 & 16 are HARD-BLOCKED.** Per PLAN.md Section 5 and CLAUDE.md,

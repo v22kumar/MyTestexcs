@@ -1,0 +1,482 @@
+% chapters/ch14_python_automation.tex — Chapter 14: Python for Test Automation
+% Scope (PLAN.md): struct.pack/unpack for binary telemetry, pyserial scripting,
+% log parsing & regex, CSV/report generation, the questions asked when "Python
+% automation framework" is on a resume, 15 graded problems.
+% Budget 25 pp. All pure-logic Python verified with python3 (runs clean);
+% pyserial/hardware snippets are marked as requiring the module/target.
+\chapter{Python for Test Automation}
+\label{ch:python-automation}
+
+\begin{partnote}
+\textbf{Scope} --- \code{struct.pack}/\code{unpack} of binary telemetry
+$\rightarrow$ \code{pyserial} port scripting $\rightarrow$ log-file parsing \&
+regex $\rightarrow$ CSV / report generation $\rightarrow$ the questions you
+\emph{will} be asked when ``Python automation'' is on your resume --- with 15
+graded problems. This is straight off the resume: the Python suite parsing
+MIL-STD-1553B and RS422 telemetry that cut regression effort by ~60\%. Expect
+the panel to make you defend exactly how that worked.
+\end{partnote}
+
+When ``Python automation framework'' appears on an embedded resume, the
+interviewer's job is to find out whether you \emph{built} it or just ran it.
+The questions probe binary protocol handling (the hard part --- bytes, not
+strings), serial I/O, parsing real device logs, and turning results into a
+report --- and whether your framework was maintainable. Every problem here is a
+piece of that.
+
+%=====================================================================
+\section{Primer}
+%=====================================================================
+
+\subsection{Binary data: \code{struct} is the whole game}
+
+Test automation for embedded means handling \emph{bytes}, and Python's
+\code{struct} module packs/unpacks C-style binary data to/from \code{bytes}
+objects with a format string: \code{>BBfH} is big-endian (\code{>}) then an
+unsigned byte, byte, 32-bit float, 16-bit unsigned --- exactly a telemetry
+frame. The endianness prefix (\code{>} big / \code{<} little / \code{!}
+network) is mandatory and the \#1 source of bugs (Chapters 1/8): get it wrong
+and every multi-byte field is byte-swapped garbage. Sub-byte fields (a 5-bit RT
+address) \code{struct} can't do directly --- you unpack the containing word then
+extract with shifts and masks, the same discipline as the C side.
+
+\subsection{Serial I/O with \code{pyserial}}
+
+\code{pyserial} (\code{import serial}) opens a port
+(\code{serial.Serial('/dev/ttyUSB0', 115200, timeout=1)}) and gives
+\code{read}/\code{write}/\code{read\_until}. The automation pattern: write a
+command frame (packed with \code{struct}), read the response with a
+\emph{timeout} (never block forever on hardware), parse it, and assert. Timeouts
+and framing (find the sync, read the declared length) matter as much as on the
+firmware side --- a test harness that hangs on a missing byte is useless.
+
+\subsection{Parsing logs and generating reports}
+
+Real device output is messy text; \textbf{regular expressions}
+(\code{import re}) extract the structured bits --- timestamps, error codes,
+measured values --- from log lines. Results then become artefacts: a
+\textbf{CSV} (\code{import csv}) for data analysis or import into a traceability
+tool, and a human-readable \textbf{report} (text/markdown/HTML) summarising
+pass/fail. The framework's value is in this loop: \emph{drive the hardware
+$\rightarrow$ capture $\rightarrow$ parse $\rightarrow$ compare to expected
+$\rightarrow$ report}, run automatically and repeatably --- which is how a manual
+regression that took days becomes a script that takes minutes (the resume's
+60\%).
+
+%=====================================================================
+\section{Q\&A Bank}
+%=====================================================================
+
+\tierbanner{Tier 1 --- Screening}{Two to four sentences.}
+
+\question{Q1.1}{How do you handle binary protocol data in Python?}
+With the \code{struct} module: \code{struct.pack(fmt, ...)} builds a
+\code{bytes} frame and \code{struct.unpack(fmt, data)} parses one, where the
+format string encodes endianness and each field's type. Sub-byte fields are
+extracted with shifts and masks after unpacking the containing integer.
+
+\question{Q1.2}{Why does endianness matter in \code{struct} formats?}
+Because the format's leading character (\code{>}, \code{<}, \code{!}, \code{=})
+sets byte order, and a wrong choice byte-swaps every multi-byte field ---
+turning a valid telemetry value into garbage. Avionics buses are often
+big-endian while the host is little-endian, so you specify it explicitly.
+
+\question{Q1.3}{What library do you use for serial port automation?}
+\code{pyserial} --- \code{serial.Serial()} (with a \code{timeout}) to open, then
+\code{write()} to send and \code{read()} / \code{read\_until()} to receive. A timeout is
+essential so the test never blocks forever on missing hardware data.
+
+\question{Q1.4}{How do you extract fields from a messy log line?}
+With a regular expression (\code{re} module) that captures the structured parts
+--- timestamp, level, code, value. \code{re.match}/\code{re.search} with capture
+groups pulls them out for comparison against expected values.
+
+\question{Q1.5}{How do you report automation results?}
+Aggregate pass/fail counts into a summary, write the raw data to CSV for
+analysis/traceability, and produce a human-readable report (text/markdown/HTML).
+The report is the artefact that makes the run auditable.
+
+\tierbanner{Tier 2 --- Core technical}{A short paragraph.}
+
+\question{Q2.1}{Walk through parsing a binary telemetry frame end to end.}
+Read the bytes (from serial or a capture file); find the frame by its sync
+pattern and read the declared length (don't trust alignment); \code{struct.unpack}
+the fixed fields with the correct endianness; extract any sub-byte fields with
+shifts/masks; \emph{validate} the CRC/checksum over the frame and the status/SSM
+before using the values; then compare against expected with a tolerance and
+record pass/fail. It's the exact pipeline of the C parser (Chapter 8), in Python
+--- which is why understanding the protocol matters more than the language.
+
+\question{Q2.2}{Your \code{struct.unpack} gives nonsense values --- debug
+checklist?}
+Check, in order: \textbf{endianness} (wrong prefix byte-swaps everything ---
+the most common cause); \textbf{format string} matches the actual field
+sizes/types and their order; \textbf{alignment/padding} (use an explicit
+\code{>}/\code{<}/\code{!} prefix, which also disables Python's native
+\emph{padding} --- a frequent surprise); the \textbf{length} of the bytes object
+matches \code{struct.calcsize(fmt)}; and that you found the true frame start
+(sync), not mid-frame. Print a hexdump of the raw bytes and decode by hand for
+the first frame to anchor it.
+
+\question{Q2.3}{How do you make a serial test robust against missing/garbled
+data?}
+Always set a \code{timeout} so reads return rather than block; frame on the sync
+word and the length field, not on byte count alone; validate the CRC and
+\emph{re-synchronise} on failure (scan for the next sync) instead of trusting
+alignment; and treat a timeout as a defined test failure, not a hang. Wrap the
+port in try/finally so it's closed even on exception. This mirrors the firmware
+receiver's discipline (Chapter 5).
+
+\question{Q2.4}{How did automation cut regression effort ~60\% --- what's the
+mechanism?}
+Manual regression means a human sending stimuli and eyeballing results for every
+test, every build --- slow, error-prone, and not repeatable. The framework
+encodes each test as: drive the input (packed command over serial), capture the
+response, parse and compare to the expected value automatically, and log
+pass/fail. Running the full suite then costs minutes of unattended execution
+instead of days of manual work, and it's \emph{repeatable and traceable} (the
+same inputs, recorded results) --- which is the actual saving and why it also
+improves quality, not just speed.
+
+\question{Q2.5}{How do you keep an automation framework maintainable?}
+Separate concerns: a protocol layer (pack/unpack, CRC), a transport layer
+(serial/file I/O), the test cases (data-driven --- each test a row of
+input/expected, not copy-pasted code), and reporting. Drive tests from data
+(CSV/JSON tables) so adding a case is adding a row; use a real test runner
+(\code{pytest}/\code{unittest}) for fixtures and reporting; and version the
+expected results. The anti-pattern is one giant script with hard-coded frames ---
+unmaintainable the moment the protocol changes.
+
+\tierbanner{Tier 3 --- Trap \& depth}{A paragraph plus the trap.}
+
+\question{Q3.1}{Your Python CRC doesn't match the firmware's CRC on the same
+bytes. Where do you look?}
+CRC mismatches between two correct-looking implementations are almost always a
+\textbf{parameter} difference, not a code bug: the \emph{polynomial}, the
+\emph{initial value} (0x0000 vs 0xFFFF), whether input/output bits are
+\emph{reflected} (bit-reversed), a final \emph{XOR}, and \emph{which bytes} are
+covered (does the firmware include the header/length, or start after the sync?).
+Also byte order of a multi-byte CRC field on the wire. \trap the trap is staring
+at the algorithm; the disciplined move is to pin all the CRC parameters (poly,
+init, refin, refout, xorout) on both sides against a known test vector ---
+``\code{123456789}'' has published CRC values per variant --- and confirm the two
+implementations cover the identical byte range. Matching a Python CRC to the C
+\code{crc16} of Chapter 13 (both 0x1021, init 0xFFFF) is exactly this exercise,
+and it's the cross-check the resume's parser relies on.
+
+\question{Q3.2}{Is Python fast/deterministic enough for hardware test, and where
+are its limits?}
+Python is ideal for the \emph{test host} side --- orchestrating, parsing,
+comparing, reporting --- where development speed and rich libraries matter and
+millisecond-level timing is fine. It is \emph{not} suited to hard real-time
+stimulus/response timing (the GC and interpreter add jitter), so cycle-accurate
+or sub-millisecond-deterministic test steps belong on the target, an FPGA, or a
+real-time HIL rig, with Python commanding them. \trap the trap is proposing
+Python to \emph{generate} a precisely-timed waveform or to meet a real-time
+deadline; the senior answer puts the determinism in hardware/firmware and uses
+Python as the flexible \emph{controller} and \emph{analyser} around it --- which
+is exactly its role in a V\&V toolchain (Chapter 12) and on the resume.
+
+\question{Q3.3}{An interviewer says ``you have Python automation on your resume
+--- prove you built it, not just ran it.'' What demonstrates depth?}
+Concrete design decisions, not features: how you handled \emph{framing} and
+\emph{resync} on a noisy serial link; how you matched the firmware's exact CRC
+parameters (Q3.1); how you made it \emph{data-driven} so new tests are table
+rows; how you handled \emph{timeouts and partial frames} so the suite never
+hangs; how you validated the \emph{SSM/status} before trusting telemetry values;
+and the measured outcome (regression time before/after). \trap the trap is
+listing libraries (``I used pyserial and struct''); depth is in the \emph{design
+choices and the edge cases you handled} --- the byte-level framing, the
+CRC-parameter matching, the maintainability structure. Being able to whiteboard
+the unpack-validate-compare pipeline and name the traps \emph{is} the proof, and
+it's the honest, defensible version of the resume claim.
+
+%=====================================================================
+\section{Coding Gym --- 15 Python Problems}
+%=====================================================================
+
+\begin{partnote}
+The pure-logic problems below were run under \code{python3} and their outputs
+confirmed; the \code{pyserial} problem is marked as requiring the module and a
+target. The CRC-16 here matches the C \code{crc16} of Chapter 13 byte-for-byte
+(\code{0x5BCE} on \code{"123"}).
+\end{partnote}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Unpack a binary telemetry frame}
+Frame: \code{id} (u8), \code{seq} (u8), \code{value} (float), \code{crc} (u16),
+big-endian.
+\begin{pygym}
+import struct
+
+def unpack_frame(b):
+    fid, seq, val, crc = struct.unpack('>BBfH', b)   # > = big-endian
+    return fid, seq, val, crc
+\end{pygym}
+\textbf{Note.} The \code{>} prefix is mandatory --- avionics frames are usually
+big-endian while the host is little-endian. \code{struct.calcsize('>BBfH')} is 8.
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Pack a command frame}
+\begin{pygym}
+def pack_cmd(fid, seq, value):
+    return struct.pack('>BBf', fid, seq, value)
+# pack_cmd(0x10, 1, 3.5) -> b'\x10\x01\x40\x60\x00\x00'
+\end{pygym}
+\textbf{Note.} The inverse of unpack; this is the stimulus you write to the
+serial port to drive a test.
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Extract sub-byte fields (1553 command word)}
+\begin{pygym}
+def decode_cmd1553(w):
+    return dict(rt=(w >> 11) & 0x1F, tr=(w >> 10) & 1,
+                sa=(w >> 5) & 0x1F, wc=w & 0x1F)
+# decode_cmd1553(0x2C22) -> {'rt': 5, 'tr': 1, 'sa': 1, 'wc': 2}
+\end{pygym}
+\textbf{Note.} \code{struct} unpacks the 16-bit word; shifts/masks pull the
+sub-byte fields --- the same field extraction as the C decoder (Chapter 8).
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{CRC-16-CCITT (match the firmware)}
+\begin{pygym}
+def crc16(data):
+    c = 0xFFFF
+    for byte in data:
+        c ^= byte << 8
+        for _ in range(8):
+            c = ((c << 1) ^ 0x1021) & 0xFFFF if (c & 0x8000) else (c << 1) & 0xFFFF
+    return c
+# crc16(b'\x31\x32\x33') -> 0x5BCE  (identical to the C version, Chapter 13)
+\end{pygym}
+\textbf{Note.} Same poly (0x1021) and init (0xFFFF) as the C \code{crc16} ---
+matching CRC parameters across host and target is the cross-check that validates
+the parser (Q3.1).
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Parse a log line with regex}
+\begin{pygym}
+import re
+
+def parse_log_line(line):
+    m = re.match(r'\[(\d{2}:\d{2}:\d{2})\]\s+(\w+)\s+code=(\d+)', line)
+    return (m.group(1), m.group(2), int(m.group(3))) if m else None
+# "[12:34:56] ERROR code=42 ..." -> ('12:34:56', 'ERROR', 42)
+\end{pygym}
+\textbf{Note.} Capture groups pull timestamp/level/code from messy device output;
+\code{None} on no match lets the caller skip non-matching lines.
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Summarise pass/fail}
+\begin{pygym}
+def summarize(results):
+    p = sum(1 for r in results if r)
+    return dict(total=len(results), passed=p, failed=len(results) - p,
+                rate=round(100.0 * p / len(results), 1))
+# [True, True, False, True] -> total=4 passed=3 failed=1 rate=75.0
+\end{pygym}
+\textbf{Note.} The aggregate behind every test report; rate is what goes at the
+top of the summary.
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Hexdump a byte buffer}
+\begin{pygym}
+def hexdump(b):
+    return ' '.join('%02X' % x for x in b)
+# b'\xDE\xAD\xBE\xEF' -> 'DE AD BE EF'
+\end{pygym}
+\textbf{Note.} The first tool you reach for when \code{unpack} gives nonsense ---
+decode the raw bytes by hand to anchor the format (Q2.2).
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Parse a CSV telemetry line}
+\begin{pygym}
+def parse_csv_line(line):
+    return [float(x) for x in line.strip().split(',')]
+# "1.5, 2.0, -3.25" -> [1.5, 2.0, -3.25]
+\end{pygym}
+\textbf{Note.} Text telemetry logs are often CSV; \code{strip()} tolerates
+whitespace. For big files prefer the \code{csv} module.
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Validate a frame checksum}
+\begin{pygym}
+def checksum_ok(frame):
+    s = sum(frame[:-1]) & 0xFF
+    return ((-s) & 0xFF) == frame[-1]   # last byte = two's-complement of the sum
+\end{pygym}
+\textbf{Note.} Mirrors the C \code{checksum} (Chapter 13); validate \emph{before}
+trusting any field, and discard/resync on failure.
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Compare with tolerance}
+\begin{pygym}
+def within_tol(expected, actual, tol):
+    return abs(expected - actual) <= tol
+# within_tol(100.0, 100.4, 0.5) -> True
+\end{pygym}
+\textbf{Note.} Hardware values are never bit-exact (ADC noise, timing) --- assert
+a band, not equality, exactly as a voter does (Chapter 8/10).
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Byte-swap a 32-bit value}
+\begin{pygym}
+def bswap32(v):
+    return ((v & 0xFF) << 24) | ((v & 0xFF00) << 8) | \
+           ((v >> 8) & 0xFF00) | ((v >> 24) & 0xFF)
+# bswap32(0x11223344) -> 0x44332211
+\end{pygym}
+\textbf{Note.} When you must convert byte order outside \code{struct} (e.g.\ a
+field you already have as an int); matches the C \code{bswap32}.
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Write a CSV report}
+\begin{pygym}
+import io, csv
+
+def make_csv(rows):
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(['name', 'expected', 'actual', 'pass'])
+    for r in rows:
+        w.writerow(r)
+    return buf.getvalue()
+\end{pygym}
+\textbf{Note.} The \code{csv} module handles quoting/escaping correctly --- never
+hand-format CSV. The output imports into a traceability tool or spreadsheet.
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Generate a markdown report}
+\begin{pygym}
+def make_report(name, results):
+    s = summarize(results)
+    return f"# {name}\n\nPassed {s['passed']}/{s['total']} ({s['rate']}%)\n"
+# -> "# UART Test\n\nPassed 2/3 (66.7%)\n"
+\end{pygym}
+\textbf{Note.} A human-readable artefact for the test record; f-strings keep it
+readable. Extend with a per-test table.
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Parse a key=value config line}
+\begin{pygym}
+def parse_kv(line):
+    d = {}
+    for pair in line.split():
+        if '=' in pair:
+            k, v = pair.split('=', 1)
+            d[k] = v
+    return d
+# "baud=115200 parity=none" -> {'baud': '115200', 'parity': 'none'}
+\end{pygym}
+\textbf{Note.} Data-driven test configuration --- the maintainable alternative to
+hard-coded parameters (Q2.5).
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Serial command/response (\texttt{\# requires pyserial + target})}
+\begin{pygym}
+# requires: pip install pyserial ; and a connected device
+import serial, struct
+
+def query(port, fid, seq, value):
+    with serial.Serial(port, 115200, timeout=1) as s:   # timeout: never block forever
+        s.write(struct.pack('>BBf', fid, seq, value))   # send command frame
+        resp = s.read(8)                                # read fixed-size response
+        if len(resp) < 8:
+            raise TimeoutError("no/short response")     # timeout = defined failure
+        return struct.unpack('>BBfH', resp)
+\end{pygym}
+\textbf{Note.} The end-to-end automation step: pack $\rightarrow$ write
+$\rightarrow$ read-with-timeout $\rightarrow$ unpack. The \code{with} block closes
+the port even on exception; a short read is a test failure, not a hang (Q2.3).
+\end{gymproblem}
+
+%=====================================================================
+\section{Link to Her Resume}
+%=====================================================================
+\begin{resumelink}
+\textbf{The 60\% automation suite:} ``My Python suite parsed MIL-STD-1553B and
+RS422 telemetry and cut manual regression effort ~60\%. The core is
+\code{struct} pack/unpack with explicit big-endian framing, sub-byte field
+extraction by shift/mask, CRC validation matched to the firmware's exact
+parameters, and a data-driven test layer that turns each case into a table row
+--- so the full suite runs unattended and repeatably.''
+
+\medskip
+\textbf{Built, not just run:} ``The hard parts were byte-level: framing and
+resync on a noisy serial link, timeouts so the suite never hangs, validating the
+status/SSM before trusting a value, and matching the CRC poly/init/reflection to
+the target. I keep Python as the host-side controller/analyser and leave
+hard-real-time timing to the hardware/HIL rig.''
+
+\medskip
+\small Maps directly to the resume's Python automation (1553B/RS422 parsing,
+~60\% regression saving) and SAP QM reporting. Deep project scripting is
+Chapter 15, from \code{inputs/INTAKE.md} only.
+\end{resumelink}
+
+%=====================================================================
+\section{Self-Test Scorecard}
+%=====================================================================
+\begin{scorecard}
+\begin{enumerate}
+\item What module handles binary protocol data, and what does \code{>BBfH} mean?
+\item Why is the endianness prefix mandatory, and what breaks without it?
+\item How do you extract a 5-bit field that \code{struct} can't unpack directly?
+\item Give the \code{struct.unpack}-gives-nonsense debug checklist.
+\item Why must serial reads have a timeout?
+\item Name the CRC parameters you must match between Python and firmware.
+\item Why assert a tolerance band rather than equality on hardware values?
+\item What makes an automation framework maintainable?
+\item Where is Python the wrong tool in a hardware test, and what replaces it?
+\item How do you \emph{prove} you built the automation, not just ran it?
+\end{enumerate}
+\end{scorecard}
+
+\begin{answerkey}
+\begin{enumerate}
+\item \code{struct}; big-endian unsigned byte, byte, 32-bit float, 16-bit
+  unsigned --- an 8-byte frame.
+\item It sets byte order; without the explicit prefix you get native order
+  \emph{and} padding, byte-swapping/misaligning every multi-byte field.
+\item Unpack the containing integer with \code{struct}, then shift and mask
+  (e.g.\ \code{(w>>11)\&0x1F}).
+\item Endianness, format vs actual sizes/order, padding (use \code{>}/\code{<}),
+  byte length vs \code{calcsize}, and true frame start (sync) --- hexdump to
+  anchor.
+\item So a test never blocks forever on missing hardware data; a timeout is a
+  defined failure.
+\item Polynomial, initial value, input/output reflection, final XOR, and the
+  covered byte range.
+\item ADC noise/timing make values non-exact; equality nuisance-fails, a band
+  reflects real tolerance.
+\item Layered design (protocol/transport/tests/reporting), data-driven cases, a
+  real test runner, versioned expected results.
+\item For hard-real-time/cycle-accurate timing (GC/interpreter jitter); put that
+  in hardware/firmware/HIL with Python as controller.
+\item Describe the design choices and edge cases --- framing/resync, CRC-parameter
+  matching, timeouts/partial frames, SSM validation, maintainability --- and the
+  measured outcome.
+\end{enumerate}
+\end{answerkey}
+
+\begin{partnote}
+\emph{End of Chapter 14, and of Part D (Coding Gym).} Part E (Interview
+Execution) follows. Chapters 15--16 (Her Project Deep-Dives; Behavioural \&
+Company) are written \textbf{only} from \code{inputs/INTAKE.md} and are gated
+until it is complete --- so the next written chapter is \textbf{Chapter 17: Mock
+Interviews}.
+\end{partnote}

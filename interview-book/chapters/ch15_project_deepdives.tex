@@ -1,0 +1,108 @@
+% chapters/ch15_project_deepdives.tex — Chapter 15: Her Project Deep-Dives
+% GATED CHAPTER. Per PLAN.md Section 5 and CLAUDE.md, this chapter is written
+% ONLY from inputs/INTAKE.md. Until its REQUIRED fields are filled, this file is
+% a SKELETON with [NEEDS INTAKE: ...] placeholders and contains NO fabricated
+% project facts (no invented defects, metrics, tools, roles, or numbers).
+\chapter{Her Project Deep-Dives}
+\label{ch:project-deepdives}
+
+\begin{partnote}
+\textbf{GATED --- skeleton only.} Per \code{PLAN.md} Section 5, every project
+fact in this chapter (what was tested, tools used, defects found, metrics, team
+size, exact role) must come from \code{inputs/INTAKE.md} --- never invented. The
+REQUIRED fields of \code{inputs/INTAKE.md} are not yet filled, so below is the
+\emph{structure} only, with \textbf{[NEEDS INTAKE: ...]} markers showing exactly
+what to supply. \textbf{Do not improvise these in an interview from the
+skeleton} --- a fabricated detail repeated confidently is dismantled by one
+follow-up. Fill INTAKE.md, then this chapter is generated in full: for each
+project, a 2-minute story, a 5-minute deep version, a block diagram to draw,
+15 likely follow-ups with answers, and prepared \emph{honest-boundary} lines.
+\end{partnote}
+
+For each project the generated chapter will contain: \textbf{(a)} a 2-minute
+spoken story (Situation/role $\rightarrow$ what you did $\rightarrow$ result);
+\textbf{(b)} a 5-minute deep version; \textbf{(c)} a block diagram you can draw
+on a whiteboard; \textbf{(d)} 15 likely follow-up questions \emph{with} your
+answers, including the uncomfortable ones (why this approach? what failed? exact
+latency/baud/voltage numbers?); and \textbf{(e)} 2--3 prepared honest-boundary
+sentences for questions beyond your scope. The technical framing for each is
+already in the chapters cross-referenced below; only the \emph{personal facts}
+are missing.
+
+%=====================================================================
+\section{Project 1 --- DFCC / AETS-DFCC SC Card Validation}
+%=====================================================================
+\emph{Technical framing: Chapters 8 (avionics buses), 11 (bring-up/debug), 12
+(V\&V). Resume basis: TASL DFCC and signal-conditioning card validation.}
+\begin{itemize}
+\item \textbf{[NEEDS INTAKE: Q1 --- exactly what signals/parameters do you check
+  on a DFCC/SC card, and the pass/fail criteria?]}
+\item \textbf{[NEEDS INTAKE: Q2 --- one real defect you found and how it was
+  resolved (symptom, root cause, fix, how verified)?]}
+\item \textbf{[NEEDS INTAKE: Q3 --- which instruments you use and which boards you
+  flash, in this project specifically?]}
+\item \textbf{[NEEDS INTAKE: Q4 --- your exact role vs the team's (what did YOU do
+  vs others)?]}
+\end{itemize}
+
+%=====================================================================
+\section{Project 2 --- CCDL Verification}
+%=====================================================================
+\emph{Technical framing: Chapter 8 (CCDL, voting, failover), Chapter 10
+(redundant control). Resume basis: CCDL data integrity, timing, failover.}
+\begin{itemize}
+\item \textbf{[NEEDS INTAKE: Q5 --- what specifically do you verify on the CCDL
+  (which data, what timing bound, what failover behaviour), and how?]}
+\item \textbf{[NEEDS INTAKE: Q6 --- any concrete number: frame rate, latency
+  bound, channel count? Only if real.]}
+\end{itemize}
+
+%=====================================================================
+\section{Project 3 --- SPIL Serial Data Link Testing}
+%=====================================================================
+\emph{Technical framing: Chapters 5 (serial/RS422), 8 (serial inter-card links).
+Resume basis: SPIL packet-level analysis and diagnostics.}
+\begin{itemize}
+\item \textbf{[NEEDS INTAKE: Q7 --- what does the SPIL link carry, and what do you
+  test at the packet level (framing, integrity, timing, loss behaviour)?]}
+\item \textbf{[NEEDS INTAKE: Q8 --- the tools and the exact diagnostics you run?]}
+\end{itemize}
+
+%=====================================================================
+\section{Project 4 --- RS422 Embedded C Interface Routines}
+%=====================================================================
+\emph{Technical framing: Chapters 1 (Embedded C), 5 (RS422). Resume basis: RS422
+Embedded C test/interface routines on the DFCC.}
+\begin{itemize}
+\item \textbf{[NEEDS INTAKE: Q9 --- what do the Embedded C routines you write
+  actually do (test routines? interface code? what function)?]}
+\item \textbf{[NEEDS INTAKE: Q10 --- roughly how much code, on what target, and
+  how is it verified?]}
+\end{itemize}
+
+%=====================================================================
+\section{Project 5 --- BEL DPRAM + MIL-STD-1553B Python Automation}
+%=====================================================================
+\emph{Technical framing: Chapters 9 (DPRAM handshake), 8 (1553B), 14 (Python
+automation), 12 (V\&V). Resume basis: ARM9/LPC3250 firmware, real-time DPRAM
+(sub-1\,ms), Python suite parsing 1553B/RS422 (about 60\% regression saving).}
+\begin{itemize}
+\item \textbf{[NEEDS INTAKE: Q11 --- the DPRAM polling architecture you validated:
+  what data, what made it sub-1\,ms, your role in it?]}
+\item \textbf{[NEEDS INTAKE: Q12 --- the Python suite: what it parsed, how the
+  ~60\% number was measured (baseline vs after)?]}
+\item \textbf{[NEEDS INTAKE: Q13 --- the white-box firmware testing on ARM9: what
+  you actually tested and found?]}
+\end{itemize}
+
+%=====================================================================
+\section{Claim--Resume Consistency Check}
+%=====================================================================
+\begin{partnote}
+When INTAKE.md is filled, every claim written here must be cross-checked against
+the resume source (the \code{.tex} in \code{resume/}) per PLAN.md Section 5.4. If
+a resume bullet overstates what INTAKE.md reveals, flag it in \code{progress.md}
+so the \emph{resume} is corrected --- the resume bends to reality, never the
+reverse. No such check can be completed until the REQUIRED INTAKE fields exist;
+this is recorded as an open gate in \code{progress.md}.
+\end{partnote}

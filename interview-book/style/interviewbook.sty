@@ -79,6 +79,29 @@
 }
 \lstnewenvironment{cgym}{\lstset{style=embeddedC}}{}
 
+% ---------- Python listings ----------
+\lstdefinestyle{pythonIB}{
+  language=Python,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\bfseries\color{accent},
+  commentstyle=\itshape\color{okgreen!85!black},
+  stringstyle=\color{orange!65!black},
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  numbersep=7pt,
+  frame=single,
+  rulecolor=\color{coderule},
+  backgroundcolor=\color{codebg},
+  breaklines=true,
+  showstringspaces=false,
+  tabsize=4,
+  columns=fullflexible,
+  keepspaces=true,
+  aboveskip=5pt,
+  belowskip=5pt
+}
+\lstnewenvironment{pygym}{\lstset{style=pythonIB}}{}
+
 % ---------- Q&A machinery ----------
 % \question{Q2.3}{How do you ...?}  -> styled question header; answer follows
 % as ordinary prose.

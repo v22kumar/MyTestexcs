@@ -1,0 +1,317 @@
+% chapters/ch17_mock_interviews.tex — Chapter 17: 5 Full Mock Interviews
+% Scope (PLAN.md): screening call, technical round 1 (C + protocols), technical
+% round 2 (domain + projects), coding round, managerial round. Each: ~45-min
+% question script, scoring rubric, full answer key (cross-referenced to the
+% chapters), common-mistake notes. Budget 20 pp. No new code (references Ch13).
+\chapter{Five Full Mock Interviews}
+\label{ch:mock-interviews}
+
+\begin{partnote}
+\textbf{Part E --- Interview Execution.} Five simulated interviews to run on
+paper (or with a partner), ~45 minutes each: \textbf{(1)} screening call,
+\textbf{(2)} technical round 1 --- C \& protocols, \textbf{(3)} technical round 2
+--- domain \& projects, \textbf{(4)} coding round, \textbf{(5)} managerial round.
+Each has a \emph{question script}, a \emph{scoring rubric}, an \emph{answer key}
+(cross-referenced to the chapters), and \emph{common-mistake} notes.
+
+\medskip
+\textbf{Rules:} answer \emph{aloud}, time yourself, and score honestly against
+the rubric before reading the key. Project- and behavioural-specific answers
+(the ``tell me about your DFCC work'' depth) live in Chapters 15--16, which are
+built only from \code{inputs/INTAKE.md}; this chapter rehearses the
+\emph{technical} rounds and the \emph{structure} of the behavioural one. Target:
+$\ge$80\% on each rubric before you sit the real thing.
+\end{partnote}
+
+%=====================================================================
+\section{Mock 1 --- Screening Call (Recruiter + Technical Phone)}
+%=====================================================================
+\emph{~30--45 min, often a lead engineer. Goal: confirm the resume is real,
+filter obvious gaps, check communication. Answers must be crisp and
+spoken-length.}
+
+\subsection*{Question script}
+\question{S1}{Walk me through your background in two minutes.}
+A tight narrative: current role (TASL UAV R\&D --- DFCC/CCDL/SPIL validation,
+RS422 Embedded C), prior role (BEL LCA-Tejas DFCC V\&V, ARM9 firmware, the
+Python automation), core strengths (embedded C, protocols, board bring-up,
+DO-178B V\&V), and what you're looking for. Practise this until it's 90 seconds,
+not five minutes.
+
+\question{S2}{What does your day-to-day actually involve?}
+Concrete activities: board bring-up and flashing (ST-Link and J-Link),
+RS422/CAN interface validation, debugging with scope, DMM, and logic analyser,
+packet-level analysis. Specifics signal a real engineer.
+
+\question{S3}{What is \code{volatile} and when do you use it? (warm-up
+technical)}
+Visibility, not atomicity; memory-mapped registers, ISR-shared globals
+(Chapter 1/4). Two sentences, confident.
+
+\question{S4}{Why is RS422 used on flight computers rather than RS232?}
+Differential noise immunity, long range, full-duplex (Chapter 5). One paragraph.
+
+\question{S5}{What's your experience with DO-178B?}
+Level A verification, MC/DC coverage, requirements traceability, ATP/QTP
+(Chapter 12) --- stated at the level the resume claims, no more.
+
+\question{S6}{Why are you leaving / looking? \quad Notice period? \quad Salary
+expectation?}
+\textbf{[From INTAKE.md / Chapter 16 --- have crisp, honest, non-negative
+answers ready. Do not improvise these on the call.]}
+
+\begin{scorecard}
+\textbf{Rubric (10 pts):} 2-min pitch is $\le$2 min and structured (2);
+day-to-day is concrete, not vague (2); \code{volatile} correct incl.\ ``not
+atomic'' (1); RS422 rationale correct (1); DO-178B claim matches resume, not
+over-stated (2); logistics answers ready and positive (2). \textbf{Pass
+$\ge$8.}
+\end{scorecard}
+
+\textbf{Common mistakes:} rambling past two minutes; vague ``I do testing''
+(say \emph{what} you test and \emph{how}); over-claiming DO-178B depth you
+can't defend; negative reasons for leaving; not knowing your own notice period/
+number. The screen is filtering for \emph{red flags}, so be concise, concrete,
+and positive.
+
+%=====================================================================
+\section{Mock 2 --- Technical Round 1 (Embedded C \& Protocols)}
+%=====================================================================
+\emph{~45 min, panel of engineers. The make-or-break round. Whiteboard-level C
+and protocol depth.}
+
+\subsection*{Question script}
+\question{T1.1}{Explain \code{volatile} vs atomic. An ISR sets a flag the main
+loop polls --- what can go wrong?}
+Visibility vs atomicity vs ordering; torn reads, reordering; fix with barrier/
+critical section (Chapters 1, 4). \emph{This is the single highest-value
+answer in the book --- nail it.}
+
+\question{T1.2}{What is structure padding? Given \code{uint8\_t; uint32\_t;
+uint16\_t}, the size and how to shrink it.}
+12 bytes $\rightarrow$ 8 by reordering largest-first (Chapter 1).
+
+\question{T1.3}{Read these declarations: \code{const char *p} vs
+\code{char *const p}.}
+Right-to-left (Chapter 1).
+
+\question{T1.4}{Describe a UART frame and how you'd compute the baud divider /
+check the error.}
+Start/data-LSB-first/parity/stop; \code{BRR=fck/baud}, error in ppm, $<$2\%
+rule (Chapter 5).
+
+\question{T1.5}{How does CAN arbitration work? Which ID wins and why no
+collision?}
+Dominant beats recessive, bitwise on the ID, loser backs off (Chapter 7).
+
+\question{T1.6}{When would you choose SPI vs I2C vs UART?}
+Clocking model, throughput, pins, device count (Chapter 6).
+
+\question{T1.7}{A node keeps going bus-off on CAN. How do you diagnose it?}
+Bit-timing/sample-point mismatch, termination, transceiver --- scope CAN\_H/L,
+check bit timing (Chapter 7).
+
+\question{T1.8}{What's the difference between an MPU and an MMU? Which does your
+LPC3250 have?}
+Protection vs translation; ARM9 has an MMU (Chapter 3).
+
+\question{T1.9}{Why does telemetry use UDP, not TCP?}
+Freshness over reliability; no retransmit stalls (Chapter 8).
+
+\question{T1.10}{Why can't you cast a received 1553/ARINC buffer onto a C
+struct?}
+Endianness + implementation-defined bitfields + wire quirks; parse with
+shifts/masks (Chapters 1, 8).
+
+\begin{scorecard}
+\textbf{Rubric (20 pts, 2 each):} T1.1 must separate visibility/atomicity/
+ordering \emph{and} name a fix (the keystone); each of T1.2--T1.10 correct and
+confident. \textbf{Pass $\ge$16; T1.1 is mandatory --- a miss there caps the
+round.}
+\end{scorecard}
+
+\textbf{Common mistakes:} ``\code{volatile} makes it thread-safe'' (instant
+red flag); forgetting the \emph{tail} padding in T1.2; saying sub-priority
+pre-empts on CAN/NVIC; ``just lower the baud/clock'' as a first reflex instead
+of measuring; trusting a struct overlay on wire data. Reason aloud and reach for
+the scope, not guesses.
+
+%=====================================================================
+\section{Mock 3 --- Technical Round 2 (Domain \& Projects)}
+%=====================================================================
+\emph{~45 min, senior/principal engineer. Depth on systems, real-time, control,
+and \emph{your} projects. This is where honesty about scope scores.}
+
+\subsection*{Question script}
+\question{T2.1}{Explain priority inversion and how it's fixed. Have you seen it?}
+High blocked on low's mutex, medium preempts low; priority inheritance; Mars
+Pathfinder (Chapter 9). \textbf{[Tie to your real timing-defect work via
+INTAKE.md.]}
+
+\question{T2.2}{Walk me through your DPRAM architecture and how it hit sub-1\,ms
+latency.}
+Single-slot flag handshake, ordering + barrier, poll period bounds latency
+(Chapter 9). \textbf{[Project specifics from INTAKE.md / Chapter 15.]}
+
+\question{T2.3}{What is CCDL and what exactly do you verify on it?}
+Cross-channel exchange + voting each frame; integrity, timing, failover;
+median/threshold vote, fail-operational vs fail-safe (Chapters 8, 10).
+
+\question{T2.4}{Explain a PID loop. What does each term cost, and what's integral
+windup?}
+P/I/D intuition, the cost of each term, anti-windup (Chapter 10).
+
+\question{T2.5}{How would you verify ``fail over to backup within 50\,ms''?}
+Fault-injection HIL measuring the time + MC/DC on detection + worst-case timing
+analysis (Chapter 12).
+
+\question{T2.6}{How does your Python suite work, and how did it cut regression
+60\%?}
+\code{struct} framing, CRC matched to firmware, data-driven cases, unattended
+repeatable runs (Chapter 14). \textbf{[Real numbers from INTAKE.md.]}
+
+\question{T2.7}{Where does your knowledge end on the control law itself?}
+\textbf{Honest boundary:} ``I verify the control-law outputs and the loop
+behaviour; the law \emph{design} is the systems team's, and it's typically
+state-space/gain-scheduled --- but I can explain how I'd verify its response.''
+(Chapter 10, Q3.3.)
+
+\begin{scorecard}
+\textbf{Rubric (14 pts, 2 each):} correct mechanism for T2.1--T2.5; project
+answers are specific and consistent with the resume (T2.2, T2.6); T2.7 shows a
+\emph{clean honest boundary} rather than bluffing. \textbf{Pass $\ge$11. A smooth
+``here's where my knowledge ends'' scores higher than a confident wrong
+answer.}
+\end{scorecard}
+
+\textbf{Common mistakes:} bluffing past your real scope (a senior interviewer
+will dig and expose it); project claims that don't match the resume; describing
+the DPRAM handshake without the \emph{ordering/barrier} that makes it safe;
+``more integral is better''; treating redundancy as ``always keeps working''
+(dual = fail-safe, triple = fail-operational). Knowing the boundary is the
+senior signal.
+
+%=====================================================================
+\section{Mock 4 --- Coding Round}
+%=====================================================================
+\emph{~45 min, whiteboard or shared editor. Write compilable C, talk through
+edge cases. All of these are in Chapter 13 --- here they're timed under
+pressure.}
+
+\subsection*{Question script (write and dry-run each)}
+\question{C1}{Implement a lock-free SPSC ring buffer for a UART RX ISR. Why no
+lock?}
+Single writer per index (Chapter 13 \#31 / Chapter 4). Expect: ``why one slot
+empty?'', ``weak-memory changes?''
+
+\question{C2}{Write \code{memcpy}. Now \code{memmove} --- what's the difference?}
+Overlap $\rightarrow$ direction choice (Chapter 13 \#16--17).
+
+\question{C3}{Reverse a singly linked list in place.}
+Three-pointer iterative (Chapter 13 \#35).
+
+\question{C4}{Count set bits better than 32 iterations.}
+Kernighan \code{v\&=v-1} (Chapter 13 \#2).
+
+\question{C5}{Parse/validate a telemetry frame: find sync, check CRC, extract
+fields. What if a byte is dropped?}
+Find-then-validate, resync on failure, shifts/masks not struct cast
+(Chapters 8, 13 \#48/\#53/\#60).
+
+\question{C6}{Write a discrete PID step with anti-windup.}
+Integral $\times dt$, clamp, conditional integration (Chapter 10).
+
+\begin{scorecard}
+\textbf{Rubric (12 pts):} C1 correct \emph{and} explains the no-lock invariant
+(3); C2 both + overlap reasoning (2); C3 correct 3-pointer (2); C4 Kernighan
+(1); C5 find/validate/resync \emph{and} no struct-cast (2); C6 correct with
+anti-windup (2). Code must be syntactically valid and the candidate must
+\emph{dry-run} it on an example. \textbf{Pass $\ge$9.}
+\end{scorecard}
+
+\textbf{Common mistakes:} off-by-one / full-vs-empty in the ring buffer; using
+\code{char} instead of \code{unsigned char} in \code{memcpy}; losing the
+\code{next} pointer in the list reverse (save it first); \code{1<<31} signed UB
+in bit code; forgetting to NUL-terminate; not dry-running the code. \emph{Talk
+while you write} --- silence reads as being stuck.
+
+%=====================================================================
+\section{Mock 5 --- Managerial / Behavioural Round}
+%=====================================================================
+\emph{~30--45 min, hiring manager. Checks ownership, teamwork, communication,
+and fit. Use STAR (Situation, Task, Action, Result). The specific stories come
+from INTAKE.md / Chapter 16 --- here, rehearse the structure.}
+
+\subsection*{Question script (answer in STAR)}
+\question{M1}{Tell me about a difficult bug you found and fixed.}
+STAR; ideally a timing/shared-data or board-level defect with a measured result
+(Chapters 4, 11). \textbf{[Real defect from INTAKE.md.]}
+
+\question{M2}{A time you disagreed with a colleague / handled conflict.}
+STAR; focus on the resolution and the professional outcome.
+
+\question{M3}{A time you were under deadline pressure. How did you prioritise?}
+STAR; show judgement (what you cut, what you protected --- e.g.\ safety/test
+coverage).
+
+\question{M4}{Something you learned recently / how you keep current.}
+Concrete: a protocol, a tool, this very interview prep --- show growth mindset.
+
+\question{M5}{Why this company? What do you know about what we build?}
+\textbf{[Company one-pager from Chapter 16 --- TASL/BEL/HAL/Honeywell/Collins/
+Safran/Boeing/Airbus/Bosch/Qualcomm.]}
+
+\question{M6}{Contract-to-permanent / third-party payroll questions.}
+\textbf{[From INTAKE.md / Chapter 16 --- factual and positive.]}
+
+\question{M7}{Do you have questions for us?}
+Always yes --- ask about the team, the product, the tools, growth. Never ``no.''
+
+\begin{scorecard}
+\textbf{Rubric (10 pts):} M1--M3 each a complete STAR with a concrete
+\emph{Result} (2 each = 6); M4 shows growth (1); M5 shows genuine company
+knowledge (2); M7 has $\ge$2 thoughtful questions ready (1). \textbf{Pass
+$\ge$8.}
+\end{scorecard}
+
+\textbf{Common mistakes:} stories with no measurable \emph{Result}; blaming
+others in the conflict question; ``I have no questions''; not researching the
+company; turning ``weakness/why leaving'' negative. Behavioural rounds reward
+\emph{structured, positive, specific} --- the same clarity as the technical
+ones.
+
+%=====================================================================
+\section{Scoring \& the 12-Week On-Ramp}
+%=====================================================================
+\begin{partnote}
+\textbf{Track your mock scores} (target $\ge$80\% each), and re-sit any round you
+fail after revisiting its chapters. Per \code{PLAN.md}'s study plan: Weeks 1--3
+foundations (Ch 1--3), 4--5 peripherals/serial (4--6), 6--7 CAN/avionics/RTOS
+(7--9), 8 control/debug/V\&V (10--12), 9--10 the Coding Gym daily + Python
+(13--14), 11 project \& behavioural narratives memorised cold (15--16, once
+INTAKE.md is filled), 12 all five mocks here plus redo every failed scorecard.
+Speak Tier-2 answers aloud; attempt every coding problem on paper before reading
+the solution. Readiness climbs 10\%\,$\rightarrow$\,100\% across the twelve
+weeks.
+\end{partnote}
+
+\begin{scorecard}
+\textbf{Overall readiness gate (sit the real interview when all are true):}
+\begin{enumerate}
+\item Mock 1 (screen) $\ge$8/10 --- pitch $\le$2\,min, logistics ready.
+\item Mock 2 (C \& protocols) $\ge$16/20 --- \code{volatile}-vs-atomic nailed.
+\item Mock 3 (domain/projects) $\ge$11/14 --- honest scope boundary clean.
+\item Mock 4 (coding) $\ge$9/12 --- ring buffer + frame parse from memory.
+\item Mock 5 (behavioural) $\ge$8/10 --- three STAR stories with results.
+\item Every chapter scorecard (1--14) passed $\ge$8/10 at least once.
+\end{enumerate}
+\end{scorecard}
+
+\begin{partnote}
+\emph{End of Chapter 17.} The book's technical spine (Chapters 1--14) and mock
+execution (17) are complete. \textbf{Chapters 15 (Her Project Deep-Dives) and 16
+(Behavioural \& Company Rounds) remain to be written from
+\code{inputs/INTAKE.md}} --- they are intentionally gated so every project and
+biographical claim is true and defensible. Fill in INTAKE.md's REQUIRED fields,
+and those two chapters complete the book.
+\end{partnote}
