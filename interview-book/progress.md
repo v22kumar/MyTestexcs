@@ -24,7 +24,7 @@ matter) on top of chapter content.
 |----|------|-------|-------------|-----------|--------|
 | 1  | ch01_embedded_c.tex | Embedded C Mastery | 70 | ~24 (Parts 1 & 2) | [x] both parts done; under budget — see note |
 | 2  | ch02_memory_toolchain.tex | Memory & Toolchain | 30 | ~14 | [x] full topic scope; see budget note |
-| 3  | ch03_arm_architecture.tex | ARM & MCU Architecture | 50 | — | [ ] |
+| 3  | ch03_arm_architecture.tex | ARM & MCU Architecture | 50 | ~16 | [x] full topic scope; see budget note |
 | 4  | ch04_interrupts_timers_dma.tex | Interrupts, Timers & DMA | 40 | — | [ ] |
 | 5  | ch05_uart_rs_serial.tex | UART / RS232 / RS422 / RS485 | 35 | — | [ ] |
 | 6  | ch06_spi_i2c.tex | SPI & I2C | 30 | — | [ ] |
@@ -40,8 +40,8 @@ matter) on top of chapter content.
 | 16 | ch16_behavioral_company.tex | Behavioral & Company Rounds | 20 | — | [ ] **BLOCKED — see note** |
 | 17 | ch17_mock_interviews.tex | 5 Full Mock Interviews | 20 | — | [ ] |
 
-**Current compiled size:** `build/book.pdf` = **40 pages** (title + TOC +
-Chapters 1–2), of the ~520 target.
+**Current compiled size:** `build/book.pdf` = **56 pages** (title + TOC +
+Chapters 1–3), of the ~520 target.
 
 ## Session log
 
@@ -97,6 +97,30 @@ Chapters 1–2), of the ~520 target.
   runs lighter than budget. Same deliberate under-budget posture as Ch 1; a
   later density pass can expand Q&A depth and add problems. Tracking, not
   hiding, the gap.
+
+### Session 4 — Chapter 3 (ARM & MCU Architecture)
+- Wrote Ch 3 in full per PLAN.md scope: Cortex-M register/programmer's model,
+  exception model & NVIC (vector table, stacking, tail-chaining/late-arrival,
+  priority grouping), pipeline & the PC+4/+8 prefetch fact, clock tree & PLL,
+  GPIO internals (push-pull vs open-drain, AF mux), MPU vs MMU, bit-banding,
+  ARM9/LPC3250-vs-Cortex-M determinism trade, Harvard vs von Neumann, and
+  ARM-vs-RISC-V awareness.
+- Template complete: Primer (6 concept sections), 3-tier Q&A (10 + 12 + 8 = 30
+  questions), Coding Gym (14 problems), resume-link box, 10-question scorecard
+  + answer key. Hits the PLAN.md 30 Q&A / 14 code / 6 concept mix exactly.
+- **Coding Gym verification:** 12 host-compilable register/clock models built
+  clean under `gcc -Wall -Wextra -std=c11` (GPIO BSRR, MODER field, NVIC
+  priority encode, SYSCLK/PLL, SysTick reload, ISER locate, bit-band alias,
+  vector table, field RMW, CLZ priority encoder, us→cycles, timer PSC/ARR).
+  2 `// target-only` fragments (PRIMASK critical section, memory-mapped UART
+  access) syntax-checked against CMSIS-intrinsic stubs — marked target-only in
+  the book, per CLAUDE.md rule 6.
+- **Compiled clean:** 56 pp total, zero LaTeX warnings (fixed two `\times`
+  tokens that had been placed inside `\code{}`).
+- **Budget note:** Ch 3 is ~16 pp vs a 50 pp budget — all 30/14/6 content is
+  present; the gap is spoken-length answers vs the budget's denser assumption.
+  Same deliberate, logged under-budget posture as Ch 1–2; a later density pass
+  (more Tier-2/3 questions, more gym problems) can close it without padding.
 
 ## Open flags / [VERIFY] / [NEEDS INTAKE] items
 - **Chapters 15 & 16 are HARD-BLOCKED.** Per PLAN.md Section 5 and CLAUDE.md,
