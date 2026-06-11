@@ -11,7 +11,8 @@ if command -v latexmk >/dev/null 2>&1; then
   latexmk -pdf -interaction=nonstopmode -halt-on-error \
           -output-directory=build main.tex
 else
-  # two passes for TOC / cross-references
+  # three passes for TOC / cross-references to settle as the book grows
+  pdflatex -interaction=nonstopmode -halt-on-error -output-directory=build main.tex
   pdflatex -interaction=nonstopmode -halt-on-error -output-directory=build main.tex
   pdflatex -interaction=nonstopmode -halt-on-error -output-directory=build main.tex
 fi

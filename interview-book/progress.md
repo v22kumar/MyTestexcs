@@ -25,7 +25,7 @@ matter) on top of chapter content.
 | 1  | ch01_embedded_c.tex | Embedded C Mastery | 70 | ~24 (Parts 1 & 2) | [x] both parts done; under budget — see note |
 | 2  | ch02_memory_toolchain.tex | Memory & Toolchain | 30 | ~14 | [x] full topic scope; see budget note |
 | 3  | ch03_arm_architecture.tex | ARM & MCU Architecture | 50 | ~16 | [x] full topic scope; see budget note |
-| 4  | ch04_interrupts_timers_dma.tex | Interrupts, Timers & DMA | 40 | — | [ ] |
+| 4  | ch04_interrupts_timers_dma.tex | Interrupts, Timers & DMA | 40 | ~16 | [x] full topic scope; see budget note |
 | 5  | ch05_uart_rs_serial.tex | UART / RS232 / RS422 / RS485 | 35 | — | [ ] |
 | 6  | ch06_spi_i2c.tex | SPI & I2C | 30 | — | [ ] |
 | 7  | ch07_can_bus.tex | CAN Bus Deep Dive | 45 | — | [ ] |
@@ -40,8 +40,8 @@ matter) on top of chapter content.
 | 16 | ch16_behavioral_company.tex | Behavioral & Company Rounds | 20 | — | [ ] **BLOCKED — see note** |
 | 17 | ch17_mock_interviews.tex | 5 Full Mock Interviews | 20 | — | [ ] |
 
-**Current compiled size:** `build/book.pdf` = **56 pages** (title + TOC +
-Chapters 1–3), of the ~520 target.
+**Current compiled size:** `build/book.pdf` = **72 pages** (title + TOC +
+Chapters 1–4 = all of Part A), of the ~520 target.
 
 ## Session log
 
@@ -121,6 +121,33 @@ Chapters 1–3), of the ~520 target.
   present; the gap is spoken-length answers vs the budget's denser assumption.
   Same deliberate, logged under-budget posture as Ch 1–2; a later density pass
   (more Tier-2/3 questions, more gym problems) can close it without padding.
+
+### Session 5 — Chapter 4 (Interrupts, Timers & DMA) — completes Part A
+- Wrote Ch 4 in full per PLAN.md scope: ISR rules, latency vs jitter, nesting
+  & priority, the shared-data problem and its fixes (volatile/ordering/
+  atomicity/critical-section/lock-free), race conditions, timer & PWM
+  frequency/duty arithmetic (worked), watchdog design (IWDG/WWDG, where to
+  kick), and DMA vs polling vs interrupt.
+- Template complete: Primer (4 concept sections), 3-tier Q&A (10 + 11 + 6 = 27
+  questions — exceeds the 22 budget), Coding Gym (14 problems), resume-link
+  box, 10-question scorecard + answer key.
+- **Coding Gym verification:** 13 host-compilable snippets clean under
+  `gcc -Wall -Wextra -std=c11` (SPSC ring buffer, ping-pong DMA buffers, PWM
+  CCR/frequency, switch debounce, tear-free 32-bit read, software countdown
+  timers, 16-bit wrap interval, IWDG timeout, response-time budget, jitter,
+  rate-limit, circular-DMA NDTR). 1 `// target-only` timer-ISR skeleton
+  syntax-checked against device-register stubs.
+- **Compiled clean:** 72 pp total, zero LaTeX warnings. Bumped `build/build.sh`
+  to a 3rd pdflatex pass so the growing TOC/cross-refs settle without the
+  "rerun" warning.
+- **Budget note:** Ch 4 is ~16 pp vs a 40 pp budget — all 22+ Q&A / 14 code / 4
+  concept content present; same deliberate spoken-length-density gap as Ch 1–3,
+  logged not padded.
+
+**Part A (Chapters 1–4) complete:** ~70 content pages, all C verified, zero
+warnings. Cumulative budget for Part A was 190 pp; running lighter (see the
+recurring density note) — a later pass can widen Q&A tiers / add gym problems
+to approach budget without filler.
 
 ## Open flags / [VERIFY] / [NEEDS INTAKE] items
 - **Chapters 15 & 16 are HARD-BLOCKED.** Per PLAN.md Section 5 and CLAUDE.md,
