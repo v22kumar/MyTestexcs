@@ -1,0 +1,599 @@
+% chapters/ch11_debugging_lab.tex — Chapter 11: Hardware Debugging & Lab Skills
+% Scope (PLAN.md): oscilloscope (triggering, probing UART/SPI/CAN, reading the
+% waveform), logic analyzer vs scope, JTAG/SWD internals, ST-Link vs J-Link,
+% breakpoints vs watchpoints, board bring-up sequence, reading schematics,
+% ESD & lab safety. Budget 30 pp, mix 22 Q&A / 4 code / 4 concept.
+% All snippets verified gcc -Wall -Wextra -std=c11 (zero warnings).
+
+\chapter{Hardware Debugging \& Lab Skills}
+\label{ch:debugging-lab}
+
+\begin{partnote}
+\textbf{Scope} --- the oscilloscope (triggering, probing, reading UART/SPI/CAN
+on screen) $\rightarrow$ logic analyser vs scope $\rightarrow$ JTAG/SWD
+internals $\rightarrow$ ST-Link vs J-Link $\rightarrow$ breakpoints vs
+watchpoints $\rightarrow$ the board bring-up sequence $\rightarrow$ reading
+schematics $\rightarrow$ ESD \& lab safety. The whole book keeps invoking
+``scope it at the receiver''; this chapter makes the instrument-led method
+explicit. It is the candidate's daily reality --- the lab instruments and
+ST-Link/J-Link on the resume.
+\end{partnote}
+
+The difference between an engineer who \emph{guesses} and one who \emph{knows} is
+the lab bench. When firmware and hardware disagree, the scope, logic analyser,
+and debugger turn ``it doesn't work'' into a measured fact. These questions probe
+whether you've actually held the probes.
+
+%=====================================================================
+\section{Primer}
+%=====================================================================
+
+\subsection{Oscilloscope vs logic analyser}
+
+An \textbf{oscilloscope} shows \emph{analog} voltage versus time on a few
+channels with fine vertical/timing resolution --- it tells you signal
+\emph{integrity}: edge shape, ringing, overshoot, noise, levels, rise time. A
+\textbf{logic analyser} shows \emph{many digital} channels as 1s and 0s with
+\emph{protocol decode} --- it tells you signal \emph{content}: the bytes on a
+UART/SPI/I2C/CAN bus, timing relationships across many lines. Rule of thumb: use
+the scope when you suspect the \emph{electrical} (is the edge clean? is the level
+right? is it terminated?), the logic analyser when you suspect the \emph{logical}
+(are the right bytes being sent? is CS framing correct?). Many bring-up problems
+need both.
+
+\subsection{Triggering --- the key scope skill}
+
+A scope is only useful if it captures the \emph{right} moment. The
+\textbf{trigger} defines that: \textbf{edge} trigger (fire on a rising/falling
+edge at a voltage threshold) is the default; \textbf{pulse-width} trigger
+catches runts or glitches of a given width; \textbf{serial/protocol} trigger
+fires on a specific byte/address/condition on UART/SPI/I2C/CAN; \textbf{single
+shot} captures a one-time event. Without a stable trigger the waveform ``runs''
+and you see nothing useful. The classic technique: toggle a spare GPIO in your
+code at the event of interest and trigger the scope on that GPIO --- turning a
+software moment into a hardware trigger (used for measuring interrupt latency in
+Chapter 4).
+
+\subsection{JTAG, SWD, and the debug probes}
+
+\textbf{JTAG} is the classic 4--5-wire (TCK/TMS/TDI/TDO/\,nTRST) boundary-scan
+and debug interface; \textbf{SWD} (Serial Wire Debug) is ARM's 2-wire
+(SWCLK/SWDIO) alternative that does the same core debug over fewer pins ---
+preferred on pin-constrained MCUs. Both let a host \textbf{debug probe} halt the
+core, read/write registers and memory, set breakpoints, and flash the chip. An
+\textbf{ST-Link} is ST's probe (bundled on every Nucleo/Discovery board, great
+value for STM32); a \textbf{J-Link} (Segger) is a higher-end probe with broad
+device support, faster flashing, and features like unlimited flash breakpoints
+and RTT. The candidate uses both (resume), choosing by target and feature need.
+
+\subsection{The board bring-up sequence}
+
+A new board comes up in a fixed order, each step a precondition for the next:
+\textbf{power} (verify every rail's voltage and ripple with a meter/scope ---
+nothing else matters if a rail is wrong) $\rightarrow$ \textbf{clocks} (confirm
+the crystal/oscillator is running at the right frequency) $\rightarrow$
+\textbf{reset} (the reset line releases cleanly, no glitches) $\rightarrow$
+\textbf{debug access} (the probe can connect over JTAG/SWD and halt the core)
+$\rightarrow$ \textbf{peripherals} (bring up GPIO/UART/buses one at a time). Skip
+a step and you chase ghosts --- a firmware bug that's really a sagging rail or a
+dead crystal. ``Power $\rightarrow$ clocks $\rightarrow$ reset $\rightarrow$ debug
+$\rightarrow$ peripherals'' is the litany.
+
+%=====================================================================
+\section{Q\&A Bank}
+%=====================================================================
+
+\tierbanner{Tier 1 --- Screening (phone / HR-technical)}%
+{Two to four sentences.}
+
+\question{Q1.1}{Oscilloscope vs logic analyser --- when each?}
+A scope shows analog voltage vs time on a few channels --- use it for signal
+integrity (edges, ringing, levels, noise). A logic analyser shows many digital
+channels with protocol decode --- use it to see the actual bytes/timing on a bus.
+Electrical problem $\rightarrow$ scope; logical/content problem $\rightarrow$
+logic analyser.
+
+\question{Q1.2}{What is triggering and why does it matter?}
+The trigger tells the scope \emph{when} to capture, so a repeating or one-shot
+event is shown stably instead of an unstable blur. Without a proper trigger
+(edge, pulse-width, protocol, single-shot) you can't see the event you care
+about.
+
+\question{Q1.3}{JTAG vs SWD?}
+Both are ARM debug interfaces; JTAG uses 4--5 wires (TCK/TMS/TDI/TDO/nTRST) and
+supports boundary scan, while SWD uses just 2 (SWCLK/SWDIO) for the same core
+debug --- preferred when pins are scarce. Both let a probe halt the core, access
+memory/registers, and flash the device.
+
+\question{Q1.4}{ST-Link vs J-Link?}
+ST-Link is ST's debug probe, bundled on STM32 dev boards --- cheap and ideal for
+STM32. J-Link (Segger) is a higher-end probe with wide device support, faster
+programming, and features like unlimited breakpoints and RTT logging. You pick by
+target and the features you need.
+
+\question{Q1.5}{Breakpoint vs watchpoint?}
+A breakpoint halts the core when execution reaches a specific \emph{address}
+(instruction); a watchpoint (data breakpoint) halts when a specific \emph{memory
+location} is read or written, regardless of where in the code. Watchpoints are
+how you catch \emph{who} corrupted a variable.
+
+\question{Q1.6}{What's the first thing you check bringing up a new board?}
+Power --- measure every supply rail for correct voltage and acceptable ripple
+before anything else. A wrong or noisy rail makes every higher-level symptom
+meaningless, so power is always step one.
+
+\question{Q1.7}{Why probe a signal at the receiver, not the transmitter?}
+Because the receiver sees what actually arrived after the cable, connectors, and
+termination have had their effect --- reflections, attenuation, and noise show up
+there. A signal can look clean at the driver and be corrupted at the far end,
+which is where the failure actually occurs.
+
+\question{Q1.8}{What is ESD and why care in the lab?}
+Electrostatic discharge --- a static voltage spike (from your body, clothing)
+that can instantly damage or, worse, \emph{latently} weaken a semiconductor. You
+mitigate it with a grounded wrist strap, ESD mat, and careful handling, because a
+zapped part may fail now or intermittently weeks later.
+
+\question{Q1.9}{What does a DMM tell you that a scope doesn't, and vice versa?}
+A DMM gives precise steady-state values (DC voltage, resistance, continuity,
+current) but not fast dynamics. A scope shows the \emph{time-varying} behaviour
+(edges, glitches, ripple, frequency) but with less DC precision. You use the DMM
+for ``is this rail 3.3\,V and is this trace continuous?'' and the scope for ``what
+does the edge look like?''
+
+\question{Q1.10}{Why use $10\times$ probe attenuation?}
+A $10\times$ probe presents higher input impedance and lower capacitance to the
+circuit, so it loads (disturbs) the signal less and has more bandwidth --- at the
+cost of $10\times$ smaller displayed amplitude (the scope compensates). For
+fast/high-impedance nodes a $1\times$ probe's loading can distort or even stop the
+signal.
+
+\tierbanner{Tier 2 --- Core technical (panel round)}%
+{A short paragraph.}
+
+\question{Q2.1}{How do you read a UART byte on a scope/logic analyser?}
+Trigger on the falling edge of the start bit (line idles high). Then sample at
+the bit centres spaced by the baud period: the start bit (0), eight data bits
+\emph{LSB first}, optional parity, and the stop bit (1). Decode the data bits
+into the byte (a logic analyser does this automatically with protocol decode).
+Confirm the bit width matches the configured baud --- a width mismatch is a
+baud/clock error (Chapter 5). This is exactly the decode in the Coding Gym.
+
+\question{Q2.2}{How do you measure interrupt latency on the bench?}
+Toggle a GPIO high the instant the triggering event occurs (or in hardware) and
+toggle another (or the same) GPIO at the very start of the ISR; trigger the scope
+on the first edge and measure the time to the second. That interval is the
+hardware-plus-software latency. The same GPIO-toggle trick measures task timing,
+loop period, and jitter --- turning software events into scope-visible edges
+(Chapter 4). For pure software timing you can also use the \code{DWT} cycle
+counter.
+
+\question{Q2.3}{Walk the board bring-up sequence and what tool you use at each
+step.}
+\textbf{Power}: DMM/scope on every rail (voltage + ripple). \textbf{Clocks}:
+scope on the crystal/oscillator (or a clock-out pin) to confirm frequency.
+\textbf{Reset}: scope the reset line for a clean release, no glitches/brownout.
+\textbf{Debug}: connect the ST-Link/J-Link over SWD/JTAG and confirm the core
+halts and the IDCODE reads. \textbf{Peripherals}: enable one at a time (GPIO
+blink first, then UART console, then the buses), scoping/analysing each. Each step
+gates the next, so a failure is localised rather than mysterious.
+
+\question{Q2.4}{How does SWD physically work over two wires?}
+SWDIO is bidirectional data and SWCLK is the clock; the host drives a packet ---
+a request (read/write, AP/DP, address, parity), then a turnaround, an ACK from
+the target, then the 32-bit data phase with its own parity. The single data line
+reverses direction (turnaround cycles) between host and target. It accesses the
+core's debug registers (the Debug Access Port) to halt, single-step, read/write
+memory, and program flash --- all the JTAG debug functions over two pins. The
+parity protects each phase (Coding Gym).
+
+\question{Q2.5}{When do you reach for a logic analyser over a scope on a bus?}
+When the electrical levels look fine but the \emph{data} is wrong, or when you
+need to see many lines together (SPI's SCLK/MOSI/MISO/CS, or a parallel bus) and
+decode the protocol. The logic analyser captures long sequences and shows
+decoded bytes, addresses, ACK/NACK, etc., which a 2--4 channel scope can't
+practically do. You'd still grab the scope if you suspect the levels/edges
+themselves (ringing, slow rise, marginal thresholds).
+
+\question{Q2.6}{What is a watchpoint good for, with an example?}
+A watchpoint halts when a chosen variable/address is accessed, so it catches
+\emph{memory corruption} without knowing where the offending code is: set a
+write-watchpoint on the variable that mysteriously changes, run, and the debugger
+stops exactly at the instruction that wrote it --- revealing a stray pointer,
+buffer overrun, or stack overflow (Chapter 2). It's the fastest way to answer
+``who is clobbering this?'' that a breakpoint (which needs you to already suspect
+the code location) can't.
+
+\question{Q2.7}{How do you read a schematic to debug a signal?}
+Trace the net of interest: find the source (which pin drives it), follow it
+through series resistors, pull-ups/downs, level shifters, and connectors to the
+destination, noting reference designators so you can probe the physical points.
+Check the power net feeding each part and the decoupling. The schematic tells you
+\emph{what the signal should be and where to measure it}; the scope tells you what
+it actually is. Net names and designators are the bridge between the drawing and
+the board.
+
+\question{Q2.8}{What is RTT and why is it useful?}
+Segger's Real-Time Transfer is a way to stream \code{printf}-style logging out
+through the debug probe (J-Link) via a RAM buffer the host reads over SWD ---
+with almost no target overhead and \emph{no UART pin}. It's far faster and less
+intrusive than a UART console and doesn't perturb timing the way a blocking
+\code{printf} does, so you can log from time-critical code. It's a key reason to
+pick a J-Link for serious debugging.
+
+\tierbanner{Tier 3 --- Trap \& depth (principal-engineer level)}%
+{A paragraph plus the trap.}
+
+\question{Q3.1}{A signal looks perfect on the scope at the driver but the
+receiver mis-reads it. Where's the fault, and how do you prove it?}
+The corruption happens \emph{in transit} --- between where you probed and where
+it's sampled --- so probing at the driver is the mistake. Likely causes:
+reflections from missing/incorrect termination (rings worst at the far end),
+attenuation/slow edges over a long or capacitive trace, crosstalk from an
+adjacent aggressor, or a ground/common-mode shift between the two ends. Proof:
+move the probe to the \emph{receiver} input pin and capture there; you'll see the
+ringing/overshoot/slow edge that the driver-side view hid. \trap the trap is
+trusting the clean driver-side capture and blaming firmware; the disciplined move
+is always to scope at the point of \emph{sampling}, which is the recurring method
+across the UART/SPI/CAN chapters and the resume's oscilloscope root-cause work.
+
+\question{Q3.2}{The debugger ``works'' but the firmware behaves differently when
+you run it standalone from reset. Enumerate causes and how the debugger hides
+them.}
+The debugger is a privileged, altered environment: it may set the stack pointer,
+clock, and \code{VTOR} for you (so a wrong vector base or uninitialised clock
+only bites from cold reset --- Chapters 2--3); it halts the core, which stops the
+watchdog from firing (hiding a watchdog-reset loop) and serialises execution
+(hiding race/timing bugs that need full speed); it may keep clocks/power-domains
+active that low-power code would gate; and loading via the debugger initialises
+RAM that a real reset leaves as garbage (hiding \code{.bss}/\code{.data} startup
+bugs). \trap the trap is treating ``runs under the debugger'' as ``works''; it's a
+different environment. The method is to reproduce from a true power-on reset and
+instrument early --- toggle a GPIO at each startup milestone, check rails/clock/
+\code{VTOR}/watchdog status --- rather than only stepping in the IDE.
+
+\question{Q3.3}{How do you debug an intermittent fault that you can't reproduce
+on demand?}
+Make it observable and captured: set up a \textbf{trigger} on the failure
+signature (a protocol error byte, a glitch of a certain width, a GPIO you toggle
+in the fault path) and let the scope/logic analyser \emph{single-shot} capture
+when it finally happens --- including pre-trigger history so you see what led up
+to it. Add lightweight always-on instrumentation (RTT logging, a circular trace
+buffer in RAM, error counters, min/max timestamps) so the fault leaves evidence.
+For corruption, an MPU region or a watchpoint can trap the moment it occurs.
+\trap the trap is trying to ``catch it live'' by staring or single-stepping ---
+intermittent faults won't cooperate. The senior approach builds a \emph{trap}
+that captures the event automatically (trigger + pre-trigger buffer + persistent
+logging), so one occurrence yields the data. This is exactly how flaky
+field/integration defects (the resume's HSI work) get cornered.
+
+\question{Q3.4}{Design a bring-up plan for a new flight-control board so a fault
+is localised, not mysterious.}
+Bring it up in dependency order with a \emph{measurement and pass/fail at each
+stage}, never skipping ahead: (1) power --- every rail's voltage, ripple, and
+sequencing on the scope, current draw within budget; (2) clocks --- crystal/PLL
+frequency confirmed on a clock-out pin; (3) reset/brownout --- clean release; (4)
+debug access --- probe connects, IDCODE matches; (5) a minimal ``hello'' (GPIO
+blink) proving the toolchain/startup/linker are right (Chapter 2); (6) each
+peripheral and bus individually, scoped/decoded, with a known-good loopback or
+reference device; (7) only then integration. Record every measurement against the
+expected value so any deviation is caught at its stage. \trap the trap is flashing
+the full application first and debugging top-down into a fog; the disciplined
+bottom-up sequence means a failure at, say, the UART stage can't be confused with
+a power or clock fault, because those already passed. That staged, instrumented,
+documented bring-up \emph{is} the integration-and-V\&V rigour the resume points
+to.
+
+%=====================================================================
+\section{Coding Gym}
+%=====================================================================
+
+\begin{partnote}
+Four host-compilable problems (verified under
+\code{gcc -Wall -Wextra -std=c11}) for the computational side of bench
+debugging: decoding a captured waveform, SWD packet parity, a bring-up state
+machine, and measuring frequency from samples --- the kind of small tools you
+write to turn captures into answers.
+\end{partnote}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Decode a UART byte from an oversampled capture}
+
+\textbf{Problem.} Given a logic-analyser capture oversampled at a known rate,
+recover the transmitted byte by sampling each bit centre.
+
+\textbf{Hints.}
+\begin{itemize}
+\item The capture starts at the start-bit edge; data is LSB-first; sample at
+  \code{os + os/2 + i*os}.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint8_t uart_decode(const uint8_t *s, int os) {
+    uint8_t b = 0;
+    for (int i = 0; i < 8; i++) {
+        int idx = os + os / 2 + i * os;          /* centre of data bit i (LSB first) */
+        b = (uint8_t)(b | ((s[idx] & 1u) << i));
+    }
+    return b;
+}
+
+int main(void) {
+    /* 'A' = 0x41, oversample 4: start, data LSB-first 1000 0010, stop, idle */
+    int bits[11] = {0, 1,0,0,0,0,0,1,0, 1, 1};
+    uint8_t s[44];
+    for (int i = 0; i < 11; i++)
+        for (int k = 0; k < 4; k++) s[i*4 + k] = (uint8_t)bits[i];
+    printf("decoded=0x%02X\n", uart_decode(s, 4));   /* 0x41 */
+    return 0;
+}
+\end{cgym}
+
+This is what a logic analyser's UART decoder does internally and what you'd write
+to post-process a raw capture: skip the start bit, sample each data bit at its
+centre (most settled point), and assemble LSB-first. If your decode comes out
+byte-reversed you sampled MSB-first; if every byte is wrong, the assumed baud
+(bit spacing) doesn't match the capture --- the same diagnoses as Chapter 5, now
+from the captured waveform.
+
+\followups
+\begin{enumerate}
+\item \emph{``Add a parity check.''} $\rightarrow$ Sample the parity-bit centre
+  and compare to the computed parity (Chapter 5).
+\item \emph{``Detect a framing error in the capture.''} $\rightarrow$ Verify the
+  stop-bit centre is high; if low, framing error.
+\item \emph{``Auto-detect the baud from the capture.''} $\rightarrow$ Measure the
+  narrowest pulse width $\rightarrow$ one bit time $\rightarrow$ baud.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{SWD packet parity}
+
+\textbf{Problem.} Compute the even parity bit used in an SWD transfer's data
+phase.
+
+\textbf{Hints.}
+\begin{itemize}
+\item SWD uses even parity; XOR-reduce the data word's bits.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static int swd_parity(uint32_t data) {
+    int p = 0;
+    while (data) { p ^= 1; data &= data - 1; }   /* count 1s mod 2 */
+    return p;
+}
+
+int main(void) {
+    printf("parity(0x5)=%d parity(0x7)=%d\n", swd_parity(0x5), swd_parity(0x7));
+    /* 0x5 has two 1s -> 0 ; 0x7 has three -> 1 */
+    return 0;
+}
+\end{cgym}
+
+Each SWD packet protects its request and data phases with a parity bit; the host
+and target each compute it and a mismatch flags a corrupted transfer (often a
+signal-integrity problem on SWDIO/SWCLK --- too-long wires, missing series
+resistor, or too-high clock). Understanding that the debug link itself is a
+\emph{protocol with integrity checking} explains why an unreliable probe
+connection throws ``parity'' or ``wire ACK'' errors --- and that the fix is
+electrical (shorten/clean the wires, lower the SWD clock), the same instrument
+discipline as any other bus.
+
+\followups
+\begin{enumerate}
+\item \emph{``SWD ACK values?''} $\rightarrow$ OK (001), WAIT (010), FAULT (100)
+  --- WAIT means retry, FAULT means a sticky error.
+\item \emph{``Why do flaky SWD connections fail at high clock?''} $\rightarrow$
+  Signal integrity on SWDIO degrades; lower the clock or shorten wires.
+\item \emph{``JTAG integrity vs SWD?''} $\rightarrow$ JTAG has more wires but the
+  same need for clean signals and reasonable TCK rate.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Board bring-up state machine}
+
+\textbf{Problem.} Model the bring-up sequence as a state machine that advances on
+success and fails fast.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Power $\rightarrow$ clock $\rightarrow$ reset $\rightarrow$ JTAG
+  $\rightarrow$ peripherals $\rightarrow$ done; any failure $\rightarrow$ fail.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+typedef enum { BU_POWER, BU_CLOCK, BU_RESET, BU_JTAG, BU_PERIPH, BU_DONE, BU_FAIL } bu_state_t;
+
+static bu_state_t bu_next(bu_state_t s, int ok) {
+    if (!ok) return BU_FAIL;                 /* fail fast: don't proceed on a bad step */
+    switch (s) {
+        case BU_POWER:  return BU_CLOCK;
+        case BU_CLOCK:  return BU_RESET;
+        case BU_RESET:  return BU_JTAG;
+        case BU_JTAG:   return BU_PERIPH;
+        case BU_PERIPH: return BU_DONE;
+        default:        return s;
+    }
+}
+
+int main(void) {
+    bu_state_t st = BU_POWER; int steps = 0;
+    while (st != BU_DONE && st != BU_FAIL) { st = bu_next(st, 1); steps++; }
+    printf("end=%d steps=%d\n", st, steps);   /* end=5 (BU_DONE) steps=5 */
+    return 0;
+}
+\end{cgym}
+
+The point isn't the code --- it's the \emph{discipline} it encodes: each stage is
+a precondition for the next, and a failure stops you \emph{at that stage} rather
+than letting you chase a phantom firmware bug caused by a bad rail or dead clock
+(Q3.4). Encoding bring-up as an explicit gated sequence (even on paper) is what
+turns a mysterious dead board into a localised, one-line failure report. It's the
+same fail-fast structure as a test sequence in Chapter 12.
+
+\followups
+\begin{enumerate}
+\item \emph{``Attach a measurement to each state.''} $\rightarrow$ Rail voltage,
+  clock frequency, IDCODE --- recorded pass/fail per stage.
+\item \emph{``Why fail fast instead of continuing?''} $\rightarrow$ Later stages'
+  results are meaningless if a precondition failed.
+\item \emph{``Map to a real ATP.''} $\rightarrow$ Each state becomes a numbered
+  test step with expected/actual (Chapter 12).
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Measure frequency from samples}
+
+\textbf{Problem.} Compute a square wave's frequency from a sampled capture by
+counting edges.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Count rising edges; frequency = edges / capture duration.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+static double measure_freq(const int *samp, int n, double sample_rate) {
+    int edges = 0;
+    for (int i = 1; i < n; i++)
+        if (samp[i-1] == 0 && samp[i] == 1) edges++;   /* rising edges */
+    double duration = (double)(n - 1) / sample_rate;
+    return edges / duration;
+}
+
+int main(void) {
+    int sq[16] = {0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1};
+    printf("freq=%.0f Hz\n", measure_freq(sq, 16, 1000.0));   /* ~533 Hz */
+    return 0;
+}
+\end{cgym}
+
+Counting edges over a known time is how a scope/analyser derives frequency, and
+how you'd verify a clock, PWM, or baud from a capture. The accuracy depends on the
+sample rate (Nyquist: sample well above the signal frequency) and the capture
+length (more cycles $\rightarrow$ better average). On the bench you'd confirm a
+crystal/PLL or a timer's output this way during bring-up (Q2.3), turning ``is the
+clock right?'' into a measured number rather than an assumption.
+
+\followups
+\begin{enumerate}
+\item \emph{``Measure duty cycle too.''} $\rightarrow$ Fraction of samples high
+  over a period --- verifies a PWM (Chapter 4).
+\item \emph{``Why must the sample rate exceed 2$\times$ the signal?''}
+  $\rightarrow$ Nyquist --- below it you alias and read a false frequency.
+\item \emph{``Period from edges instead?''} $\rightarrow$ Average the
+  sample-distance between successive rising edges; more precise for few cycles.
+\end{enumerate}
+\end{gymproblem}
+
+%=====================================================================
+\section{Link to Her Resume}
+%=====================================================================
+
+\begin{resumelink}
+\textbf{Instrument-led root cause:} ``My root-cause method is instrument-led: I
+scope the signal \emph{at the receiver} to separate electrical faults
+(ringing $\rightarrow$ termination, slow edge $\rightarrow$ loading) from
+logical ones, use a logic analyser to read the actual bytes on UART/SPI/CAN, and
+a DMM for rails and continuity --- the oscilloscopes, DMMs, and analysers on my
+resume.''
+
+\medskip
+\textbf{Debug probes \& flashing:} ``I flash and debug across boards with
+ST-Link and J-Link over SWD/JTAG --- halting the core, setting breakpoints and
+\emph{watchpoints} to catch memory corruption, and using RTT for low-overhead
+logging from timing-critical code.''
+
+\medskip
+\textbf{Board bring-up:} ``I bring boards up in dependency order --- power,
+clocks, reset, debug access, then peripherals one at a time --- with a
+measurement and pass/fail at each stage, so a fault is localised rather than a
+mystery. That's the same staged rigour as an ATP.''
+
+\medskip
+\small Maps directly to the resume: ST-Link and J-Link flashing and debug
+across the autopilot and supporting boards, oscilloscope / DMM / logic-analyser
+root-cause work, and multi-board bring-up at TASL. Deep project scripting is
+Chapter 15, from \code{inputs/INTAKE.md} only.
+\end{resumelink}
+
+%=====================================================================
+\section{Self-Test Scorecard}
+%=====================================================================
+
+\begin{scorecard}
+\begin{enumerate}
+\item Scope vs logic analyser --- which for an electrical fault, which for
+  wrong data?
+\item Why is triggering the key scope skill, and name two trigger types.
+\item JTAG vs SWD --- pin counts and what both do.
+\item Breakpoint vs watchpoint --- which catches ``who corrupted this
+  variable?''
+\item State the board bring-up order and the first step's tool.
+\item Why probe at the receiver rather than the driver?
+\item How do you measure interrupt latency on the bench?
+\item What is RTT and why use it over a UART console?
+\item Why does firmware sometimes work under the debugger but fail from reset?
+\item How do you catch an intermittent fault you can't reproduce on demand?
+\end{enumerate}
+\end{scorecard}
+
+\begin{answerkey}
+\begin{enumerate}
+\item Scope for electrical (edges/levels/ringing); logic analyser for wrong
+  data/protocol content.
+\item It captures the right moment stably; e.g.\ edge and serial/protocol (also
+  pulse-width, single-shot).
+\item JTAG 4--5 wires (TCK/TMS/TDI/TDO/nTRST), SWD 2 wires (SWCLK/SWDIO); both
+  halt the core, access memory/registers, and flash.
+\item A watchpoint (data breakpoint) --- it halts on access to the address,
+  revealing the culprit instruction.
+\item Power $\rightarrow$ clocks $\rightarrow$ reset $\rightarrow$ debug
+  $\rightarrow$ peripherals; first step uses a DMM/scope on the rails.
+\item The receiver sees the signal after cable/connector/termination effects ---
+  where corruption actually occurs.
+\item Toggle a GPIO at the event and another at ISR entry; trigger on the first,
+  measure to the second (or use DWT cycles).
+\item Real-Time Transfer --- streams logging through the debug probe via a RAM
+  buffer; faster, no UART pin, minimal timing perturbation.
+\item The debugger sets SP/clock/VTOR, halts the watchdog, initialises RAM, and
+  serialises execution --- hiding startup/race/watchdog bugs that bite from cold
+  reset.
+\item Build a trap: trigger + pre-trigger capture on the fault signature, plus
+  always-on logging (RTT/trace buffer/counters) or a watchpoint/MPU, so one
+  occurrence yields data.
+\end{enumerate}
+\end{answerkey}
+
+\begin{partnote}
+\emph{End of Chapter 11.} Next: \textbf{V\&V, DO-178B \& Test Methodology} ---
+white/black/grey box, coverage (statement/branch/MC/DC), requirements
+traceability, ATP/QTP, HIL, fault injection, and the defect lifecycle --- the
+verification framework around everything built so far.
+\end{partnote}

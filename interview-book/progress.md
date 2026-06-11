@@ -32,7 +32,7 @@ matter) on top of chapter content.
 | 8  | ch08_avionics_buses.tex | Avionics Data Buses | 40 | ~11 | [x] full topic scope |
 | 9  | ch09_rtos_realtime.tex | RTOS & Real-Time | 40 | ~14 | [x] full topic scope |
 | 10 | ch10_control_pid.tex | Control Systems & PID | 30 | ~10 | [x] full topic scope |
-| 11 | ch11_debugging_lab.tex | Hardware Debugging & Lab Skills | 30 | — | [ ] |
+| 11 | ch11_debugging_lab.tex | Hardware Debugging & Lab Skills | 30 | ~8 | [x] full topic scope |
 | 12 | ch12_vnv_do178.tex | V&V, DO-178B & Test Methodology | 30 | — | [ ] |
 | 13 | ch13_coding_gym.tex | 60 Embedded C Problems | 60 | — | [ ] |
 | 14 | ch14_python_automation.tex | Python for Test Automation | 25 | — | [ ] |
@@ -40,8 +40,8 @@ matter) on top of chapter content.
 | 16 | ch16_behavioral_company.tex | Behavioral & Company Rounds | 20 | — | [ ] **BLOCKED — see note** |
 | 17 | ch17_mock_interviews.tex | 5 Full Mock Interviews | 20 | — | [ ] |
 
-**Current compiled size:** `build/book.pdf` = **141 pages** (title + TOC +
-Chapters 1–10), of the ~520 target.
+**Current compiled size:** `build/book.pdf` = **149 pages** (title + TOC +
+Chapters 1–11), of the ~520 target.
 
 ## Session log
 
@@ -213,6 +213,16 @@ to approach budget without filler.
   (discrete PID, anti-windup clamp, derivative-on-measurement, EMA filter,
   Ziegler-Nichols gains, step-response metrics 20%/0.5s).
 - Compiled clean: 141 pp, zero LaTeX warnings.
+
+### Session 12 — Chapter 11 (Hardware Debugging & Lab Skills)
+- Full PLAN.md scope: oscilloscope triggering/probing, logic analyser vs scope,
+  JTAG/SWD, ST-Link vs J-Link, breakpoints vs watchpoints, board bring-up
+  sequence, schematic reading, ESD & lab safety.
+- Template complete: Primer (4 sections), 3-tier Q&A (10 + 8 + 4 = 22
+  questions), Coding Gym (4 problems), resume-link box, scorecard + answer key.
+- 4 host snippets verified clean under `gcc -Wall -Wextra -std=c11` (UART
+  capture decode 0x41, SWD parity, bring-up state machine, frequency-from-samples).
+- Compiled clean: 149 pp, zero LaTeX warnings (reworded one underfull line).
 
 ## Open flags / [VERIFY] / [NEEDS INTAKE] items
 - **Chapters 15 & 16 are HARD-BLOCKED.** Per PLAN.md Section 5 and CLAUDE.md,
