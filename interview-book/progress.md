@@ -33,15 +33,15 @@ matter) on top of chapter content.
 | 9  | ch09_rtos_realtime.tex | RTOS & Real-Time | 40 | ~14 | [x] full topic scope |
 | 10 | ch10_control_pid.tex | Control Systems & PID | 30 | ~10 | [x] full topic scope |
 | 11 | ch11_debugging_lab.tex | Hardware Debugging & Lab Skills | 30 | ~8 | [x] full topic scope |
-| 12 | ch12_vnv_do178.tex | V&V, DO-178B & Test Methodology | 30 | — | [ ] |
+| 12 | ch12_vnv_do178.tex | V&V, DO-178B & Test Methodology | 30 | ~9 | [x] full topic scope |
 | 13 | ch13_coding_gym.tex | 60 Embedded C Problems | 60 | — | [ ] |
 | 14 | ch14_python_automation.tex | Python for Test Automation | 25 | — | [ ] |
 | 15 | ch15_project_deepdives.tex | Her Project Deep-Dives | 25 | — | [ ] **BLOCKED — see note** |
 | 16 | ch16_behavioral_company.tex | Behavioral & Company Rounds | 20 | — | [ ] **BLOCKED — see note** |
 | 17 | ch17_mock_interviews.tex | 5 Full Mock Interviews | 20 | — | [ ] |
 
-**Current compiled size:** `build/book.pdf` = **149 pages** (title + TOC +
-Chapters 1–11), of the ~520 target.
+**Current compiled size:** `build/book.pdf` = **156 pages** (title + TOC +
+Chapters 1–12 = all of Part C), of the ~520 target.
 
 ## Session log
 
@@ -223,6 +223,17 @@ to approach budget without filler.
 - 4 host snippets verified clean under `gcc -Wall -Wextra -std=c11` (UART
   capture decode 0x41, SWD parity, bring-up state machine, frequency-from-samples).
 - Compiled clean: 149 pp, zero LaTeX warnings (reworded one underfull line).
+
+### Session 13 — Chapter 12 (V&V, DO-178B & Test Methodology) — completes Part C
+- Full PLAN.md scope: white/black/grey box, statement/branch/MC-DC coverage,
+  DO-178B levels A-E, requirements traceability, ATP/QTP, HIL, fault injection,
+  defect lifecycle & 5-why, AS9100.
+- Template complete: Primer (4 sections), 3-tier Q&A (10 + 8 + 4 = 22
+  questions), Coding Gym (2 problems), resume-link box, scorecard + answer key.
+- 2 host snippets verified clean under `gcc -Wall -Wextra -std=c11` (MC/DC
+  independence-pair checker, requirements-traceability coverage query).
+- Compiled clean: 156 pp, zero LaTeX warnings.
+- **Part C (Chapters 9-12) complete.**
 
 ## Open flags / [VERIFY] / [NEEDS INTAKE] items
 - **Chapters 15 & 16 are HARD-BLOCKED.** Per PLAN.md Section 5 and CLAUDE.md,

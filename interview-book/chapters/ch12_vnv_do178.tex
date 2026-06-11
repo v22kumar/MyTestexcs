@@ -1,0 +1,527 @@
+% chapters/ch12_vnv_do178.tex — Chapter 12: V&V, DO-178B & Test Methodology
+% Scope (PLAN.md): white/black/grey box, statement vs branch vs MC/DC coverage,
+% DO-178B levels A-E, requirements traceability, ATP vs QTP, HIL testing,
+% fault injection, defect lifecycle & root cause (5-why), AS9100.
+% Budget 30 pp, mix 24 Q&A / 2 code / 4 concept.
+% All snippets verified gcc -Wall -Wextra -std=c11 (zero warnings).
+
+\chapter{V\&V, DO-178B \& Test Methodology}
+\label{ch:vnv-do178}
+
+\begin{partnote}
+\textbf{Scope} --- white / black / grey box testing $\rightarrow$ coverage
+(statement / branch / MC/DC) $\rightarrow$ DO-178B levels A--E $\rightarrow$
+requirements traceability $\rightarrow$ ATP vs QTP $\rightarrow$ HIL testing
+$\rightarrow$ fault injection $\rightarrow$ defect lifecycle \& root-cause
+(5-why) $\rightarrow$ AS9100. This is the candidate's professional core ---
+DO-178B Level A verification, 100\% requirements-to-test traceability, ATP/QTP
+authoring, white/black-box firmware testing --- so it must be the most
+fluent chapter of all.
+\end{partnote}
+
+Verification and Validation answers two questions: \emph{``did we build the
+product right?''} (verification --- against the requirements) and \emph{``did we
+build the right product?''} (validation --- it meets the real need). In
+safety-critical avionics this isn't paperwork; it's the discipline that lets you
+\emph{claim}, with evidence, that flight software won't kill anyone. Every
+question here is about producing that evidence rigorously.
+
+%=====================================================================
+\section{Primer}
+%=====================================================================
+
+\subsection{White, black, and grey box}
+
+\textbf{Black-box} testing exercises the software through its interface against
+its \emph{requirements}, with no knowledge of the internal code --- it answers
+``does it do what the requirement says?'' \textbf{White-box} (structural) testing
+uses knowledge of the code structure to exercise paths, branches, and conditions
+--- it answers ``is every part of the code actually tested?'' \textbf{Grey-box}
+combines them: requirement-driven tests informed by some internal knowledge
+(e.g.\ to target boundary cases). A rigorous process uses black-box tests derived
+from requirements \emph{and} measures white-box coverage to prove the
+requirements-based tests actually exercised all the code --- which is exactly
+the DO-178B model.
+
+\subsection{Coverage: statement, branch, MC/DC}
+
+Structural coverage measures how thoroughly tests exercise the code, in
+increasing strictness. \textbf{Statement coverage}: every line executed at least
+once (weak --- misses untaken branches). \textbf{Branch (decision) coverage}:
+every decision taken both true and false. \textbf{MC/DC} (Modified
+Condition/Decision Coverage): for every \emph{condition} in a compound decision,
+a test must show that condition \emph{independently} affecting the outcome ---
+i.e.\ flipping just that condition flips the result, with the others held fixed.
+MC/DC is required for the highest assurance level because it catches errors in
+the boolean logic that branch coverage misses (a condition that's never actually
+the deciding factor). It needs roughly $N+1$ tests for $N$ conditions, not the
+$2^N$ of exhaustive testing.
+
+\subsection{DO-178B levels and the V-model}
+
+DO-178B assigns a \textbf{Design Assurance Level} by the consequence of failure:
+\textbf{A} (catastrophic --- loss of aircraft) the most rigorous, through
+\textbf{B} (hazardous), \textbf{C} (major), \textbf{D} (minor), to \textbf{E}
+(no effect). Higher levels demand more objectives --- notably, MC/DC coverage is
+required at Level A, decision coverage at B, statement at C. The process follows
+the \textbf{V-model}: requirements $\rightarrow$ design $\rightarrow$ code down
+the left arm, with verification (reviews, then unit/integration/system test) up
+the right arm, each test level tracing back to the artefact it verifies. The
+guiding principle is \textbf{traceability}: every requirement traces to design,
+code, and tests, and every test traces back to a requirement --- nothing
+untested, nothing untraceable.
+
+\subsection{ATP/QTP, HIL, fault injection, defect lifecycle}
+
+An \textbf{ATP} (Acceptance Test Procedure) is the formal, numbered, step-by-step
+procedure --- each step with an expected result --- run to \emph{accept} a
+product against its requirements; a \textbf{QTP} (Qualification Test Procedure)
+qualifies it against the full spec/environment. \textbf{HIL} (Hardware-in-the-
+Loop) testing runs the real flight computer against a \emph{simulated} aircraft/
+environment in real time, so you can exercise scenarios (and failures) you can't
+fly. \textbf{Fault injection} deliberately introduces faults (bad inputs,
+corrupted data, hardware failures) to verify the system detects and handles them
+safely. The \textbf{defect lifecycle} tracks a found defect from report
+$\rightarrow$ triage $\rightarrow$ root-cause (e.g.\ \textbf{5-why}) $\rightarrow$
+fix $\rightarrow$ re-test/regression $\rightarrow$ close, with traceability
+throughout --- and \textbf{AS9100} is the aerospace quality-management standard
+wrapping all of it.
+
+%=====================================================================
+\section{Q\&A Bank}
+%=====================================================================
+
+\tierbanner{Tier 1 --- Screening (phone / HR-technical)}%
+{Two to four sentences.}
+
+\question{Q1.1}{Verification vs validation?}
+Verification asks ``did we build it right?'' --- does the software meet its
+specified requirements (reviews, tests). Validation asks ``did we build the right
+thing?'' --- do those requirements and the product meet the actual operational
+need. V\&V together give confidence the system is both correct and fit for
+purpose.
+
+\question{Q1.2}{Black-box vs white-box testing?}
+Black-box tests through the interface against requirements, ignoring internal
+code; white-box uses knowledge of the code structure to exercise its paths,
+branches, and conditions. Black-box checks behaviour; white-box checks that the
+code is thoroughly exercised.
+
+\question{Q1.3}{What is statement coverage?}
+The fraction of executable statements (lines) run at least once by the tests.
+It's the weakest structural metric --- 100\% statement coverage can still miss
+untaken branches and faulty conditions.
+
+\question{Q1.4}{What is branch (decision) coverage?}
+Every decision point (if/while/switch) is exercised in both its true and false
+outcomes. Stronger than statement coverage because it forces both directions of
+every branch.
+
+\question{Q1.5}{What is MC/DC and where is it required?}
+Modified Condition/Decision Coverage requires showing that each condition in a
+compound decision independently affects the outcome. It's required for DO-178B
+Level A (the most safety-critical) software, because it catches boolean-logic
+errors that branch coverage misses.
+
+\question{Q1.6}{What do the DO-178B levels A--E mean?}
+They're Design Assurance Levels set by failure severity: A = catastrophic
+(most rigorous), B = hazardous, C = major, D = minor, E = no safety effect
+(least). Higher levels require more verification objectives and stricter
+coverage.
+
+\question{Q1.7}{What is requirements traceability?}
+A documented bidirectional link from each requirement to its design, code, and
+test cases, and from each test back to a requirement. It proves every
+requirement is implemented and tested, and that no code/test exists without a
+reason --- the backbone of a certifiable process.
+
+\question{Q1.8}{ATP vs QTP?}
+An Acceptance Test Procedure is the formal step-by-step procedure (each step with
+an expected result) to accept a product against its requirements; a Qualification
+Test Procedure qualifies it against the full specification/environment.
+Both are controlled documents producing recorded pass/fail evidence.
+
+\question{Q1.9}{What is HIL testing?}
+Hardware-in-the-Loop runs the actual embedded target connected to a real-time
+simulation of the plant/aircraft, so the real firmware experiences realistic
+(and fault) scenarios without flying. It bridges bench unit testing and flight
+test.
+
+\question{Q1.10}{What is fault injection?}
+Deliberately introducing faults --- bad inputs, corrupted data, simulated
+hardware failures --- to verify the system detects and responds to them safely.
+It tests the error-handling and safety paths that normal testing rarely
+exercises.
+
+\tierbanner{Tier 2 --- Core technical (panel round)}%
+{A short paragraph.}
+
+\question{Q2.1}{Why isn't 100\% statement coverage enough for safety-critical
+code?}
+Because a statement can be covered without both outcomes of the decisions around
+it being tested. \code{if (a) x = 1;} reaches 100\% statement coverage with a
+single test where \code{a} is true --- but the \code{a == false} path (where
+\code{x} keeps its old value) is never exercised, and a bug there is invisible.
+Branch coverage forces both directions; MC/DC additionally forces each condition
+to be shown to matter. Higher assurance demands stronger coverage precisely
+because weaker metrics give false confidence.
+
+\question{Q2.2}{Explain MC/DC with a concrete example.}
+Take \code{if (a \&\& b)}. MC/DC requires, for each condition, a pair of tests
+that differ \emph{only} in that condition and produce different outcomes. For
+\code{a}: tests (a=1,b=1)$\rightarrow$true and (a=0,b=1)$\rightarrow$false show
+\code{a} independently flips the result. For \code{b}: (a=1,b=1)$\rightarrow$true
+and (a=1,b=0)$\rightarrow$false show \code{b} matters. Three tests --- \{11, 01,
+10\} --- achieve MC/DC for two conditions ($N+1$), versus four for exhaustive.
+The checker in the Coding Gym verifies exactly these independence pairs exist.
+
+\question{Q2.3}{Walk the V-model and where each test level fits.}
+Down the left arm: system requirements $\rightarrow$ high-level (software)
+requirements $\rightarrow$ design $\rightarrow$ code. Up the right arm, each
+level verifies its left-arm counterpart: \textbf{unit/low-level tests} verify the
+code against the design/low-level requirements (with structural coverage);
+\textbf{integration tests} verify components work together per the architecture;
+\textbf{system/acceptance tests} verify the whole against the high-level/system
+requirements (ATP). The horizontal links are traceability: every test traces to
+the requirement it verifies, and gaps (a requirement with no test, code with no
+requirement) are defects in the process itself.
+
+\question{Q2.4}{How does requirements traceability actually work day to day?}
+Each requirement gets a unique ID; design elements, code, and test cases
+reference those IDs, and a \textbf{traceability matrix} (often in a tool ---
+DOORS, or a managed spreadsheet/SAP QM record) maps requirements
+$\leftrightarrow$ tests. You can then query: which tests cover requirement X (and
+did they pass), and which requirements lack a test (a coverage gap). 100\%
+requirements-to-test traceability means every requirement has at least one
+passing test and every test justifies itself --- the claim on the resume, and the
+thing an auditor checks first. The Coding Gym models the coverage query.
+
+\question{Q2.5}{What's the difference between a requirements-based test and a
+structural-coverage measurement, and why do you need both?}
+A requirements-based (black-box) test checks the software \emph{does what it
+should}; structural coverage (white-box) measures \emph{how much of the code} the
+tests exercised. You need both because requirements tests can pass while leaving
+code paths untested (dead code, unanticipated branches, error handlers), and
+coverage without requirements just exercises code without checking correctness.
+DO-178B's model is: derive tests from requirements, run them, then \emph{measure}
+structural coverage --- and any uncovered code must be explained (it's dead code
+to remove, or a missing requirement/test). The two together close the loop.
+
+\question{Q2.6}{Why is HIL testing valuable, and what are its limits?}
+HIL lets the real firmware experience realistic dynamic scenarios --- including
+dangerous or rare failure conditions (engine-out, sensor failure, out-of-range
+inputs) --- in real time, repeatably, without risking an aircraft, and far
+earlier and cheaper than flight test. Its limits: the simulation is only as good
+as its models (an unmodelled effect won't be caught), real-time fidelity and I/O
+timing must be accurate, and it can't fully replace flight test for the
+un-modelled real world. It's the crucial middle of the verification pyramid
+between bench and flight.
+
+\question{Q2.7}{Describe the defect lifecycle and the role of root-cause
+analysis.}
+A defect is \textbf{reported} (with steps to reproduce), \textbf{triaged}
+(severity/priority, assigned), \textbf{root-caused} (find the actual cause, not
+the symptom --- e.g.\ \textbf{5-why}: keep asking ``why?'' until you reach the
+true origin), \textbf{fixed}, \textbf{re-tested} (the specific case) and
+\textbf{regression-tested} (nothing else broke), then \textbf{closed} --- all
+recorded with traceability to the requirement/test involved. Root-cause matters
+because fixing the symptom leaves the real defect to recur; a 5-why on ``the
+output was wrong'' might reach ``a shared variable wasn't protected'' (Chapter 4)
+--- the actual fix.
+
+\question{Q2.8}{What is AS9100 and how does it relate to DO-178B?}
+AS9100 is the aerospace \emph{quality management system} standard (built on
+ISO\,9001 with aviation/defence additions) --- it governs the organisation's
+processes: document control, configuration management, traceability, supplier
+control, corrective action. DO-178B is specifically about \emph{software}
+development assurance. They're complementary: AS9100 is the quality framework the
+company operates under (the SAP QM records, the controlled procedures), DO-178B
+is the software-specific objective set within it. The resume's SAP QM /
+AS9100 work is the QMS side; the DO-178B Level A work is the software-assurance
+side.
+
+\tierbanner{Tier 3 --- Trap \& depth (principal-engineer level)}%
+{A paragraph plus the trap.}
+
+\question{Q3.1}{You have 100\% MC/DC coverage and all requirements-based tests
+pass. Can the software still be wrong? How?}
+Yes --- coverage proves the \emph{code you wrote} was thoroughly exercised and
+meets the \emph{requirements you wrote}; it says nothing about \emph{missing}
+requirements or wrong requirements. If a requirement is absent (an unhandled edge
+case nobody specified) or incorrect (it specifies the wrong behaviour), the code
+can be fully covered, fully traceable, fully passing --- and still do the wrong
+thing. That's the verification-vs-\emph{validation} gap. Also, coverage doesn't
+catch concurrency/timing bugs (a race may need a specific interleaving), or
+errors in the requirements-to-test interpretation. \trap the trap is treating
+``100\% MC/DC + all tests green'' as ``proven correct.'' It proves the code is
+\emph{right against the requirements}; validation, requirements review, robustness
+(out-of-range/fault-injection) testing, and timing analysis cover what coverage
+cannot. Naming that boundary is senior-level V\&V judgement.
+
+\question{Q3.2}{Why does MC/DC use $N+1$ tests instead of all $2^N$
+combinations, and what's the risk in the reduction?}
+Exhaustive testing of $N$ conditions needs $2^N$ combinations --- infeasible for
+large decisions. MC/DC achieves high confidence with ~$N+1$ tests by requiring,
+\emph{per condition}, just the pair that demonstrates independent effect ---
+which catches any single condition being wrong (stuck, inverted, or omitted)
+without testing every combination. The risk in the reduction: MC/DC can miss
+certain \emph{multiple-condition} interaction errors and is sensitive to how the
+boolean expression is structured (coupled conditions, short-circuit evaluation),
+and a poorly written compound condition can be hard to achieve MC/DC on
+honestly. \trap the trap is thinking MC/DC = exhaustive; it's a carefully chosen
+\emph{subset} that's sound for single-condition faults. The discipline is
+keeping decisions simple (avoid deeply coupled conditions) so MC/DC is both
+achievable and meaningful --- which also makes the code reviewable.
+
+\question{Q3.3}{A defect is found in flight-critical code late in the program.
+Walk the rigorous response, not just ``fix it.''}
+Beyond the patch: (1) \textbf{contain} --- assess if shipped/other builds are
+affected (configuration management tells you where the code is used); (2)
+\textbf{root-cause} --- 5-why to the true origin, and ask whether the \emph{same
+class} of defect exists elsewhere (a missing volatile, an unprotected shared
+variable, a requirement gap); (3) \textbf{assess process escape} --- why did
+verification not catch it? (missing test, missing requirement, inadequate
+coverage, review gap) and fix the \emph{process}, not just the code; (4)
+\textbf{fix with traceability} --- update requirement/design/code/test together,
+re-run the specific and regression tests, re-measure coverage; (5)
+\textbf{document} the corrective action (AS9100). \trap the trap is the
+narrow ``fix the bug and move on''; in safety-critical work a defect is also
+\emph{evidence of a process escape}, and the rigorous response asks ``what else
+slipped through the same gap, and how do we close it?'' That systemic view ---
+fixing the defect \emph{and} the hole that let it through --- is what distinguishes
+real V\&V engineering, and it's the mindset behind the resume's defect-management
+and traceability work.
+
+\question{Q3.4}{How would you verify a requirement like ``the system shall fail
+over to the backup channel within 50\,ms of a primary fault''?}
+Decompose it into testable assertions and pick methods per assertion:
+\textbf{requirements-based} HIL test --- inject a primary-channel fault (fault
+injection) and \emph{measure} the failover time against the 50\,ms bound,
+repeated across fault types and operating points, with the timing captured
+objectively (a logged timestamp or a scope on a GPIO, Chapter 11); \textbf{robustness}
+--- inject faults at boundary moments (mid-frame, during a CCDL exchange) to catch
+timing races; \textbf{structural} --- confirm the failover code path is covered
+(MC/DC on the detection logic) and that no path bypasses the deadline;
+\textbf{analysis} --- a worst-case timing analysis (Chapter 9) showing the 50\,ms
+is met even in the worst scheduling case, since a single test only samples one
+interleaving. \trap the trap is a single happy-path test that passes once; a
+\emph{timing} safety requirement needs measured failover under injected faults
+\emph{plus} worst-case analysis, because the deadline must hold every time, not
+on average. This is precisely the CCDL ``integrity, timing, failover''
+verification on the resume, expressed as a rigorous V\&V argument.
+
+%=====================================================================
+\section{Coding Gym}
+%=====================================================================
+
+\begin{partnote}
+Two host-compilable problems (verified under
+\code{gcc -Wall -Wextra -std=c11}) for the computational side of V\&V: an MC/DC
+independence-pair checker and a requirements-traceability coverage query --- the
+logic behind the coverage and traceability tools.
+\end{partnote}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{MC/DC coverage checker}
+
+\textbf{Problem.} Given a set of test vectors (input combinations and outcomes)
+for a boolean decision, determine whether MC/DC is satisfied --- each condition
+shown to independently affect the outcome.
+
+\textbf{Hints.}
+\begin{itemize}
+\item For condition \code{c}, look for two tests differing only in bit \code{c}
+  with different outcomes.
+\item Full MC/DC requires such an independence pair for every condition.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static int mcdc_condition_covered(const uint32_t *inmask, const int *outcome,
+                                  int ntests, int cond) {
+    for (int a = 0; a < ntests; a++)
+        for (int b = 0; b < ntests; b++)
+            if ((inmask[a] ^ inmask[b]) == (1u << cond) && outcome[a] != outcome[b])
+                return 1;          /* independence pair found for this condition */
+    return 0;
+}
+static int mcdc_full(const uint32_t *inmask, const int *outcome, int ntests, int nconds) {
+    for (int c = 0; c < nconds; c++)
+        if (!mcdc_condition_covered(inmask, outcome, ntests, c)) return 0;
+    return 1;
+}
+
+int main(void) {
+    /* decision = a && b ; bit0=a, bit1=b. Minimal MC/DC set: {11,10,01} */
+    uint32_t good[3] = {0x3, 0x2, 0x1};  int gout[3] = {1, 0, 0};
+    uint32_t weak[2] = {0x3, 0x0};       int wout[2] = {1, 0};   /* only 11,00 */
+    printf("good=%d weak=%d\n",
+           mcdc_full(good, gout, 3, 2), mcdc_full(weak, wout, 2, 2));   /* 1 0 */
+    return 0;
+}
+\end{cgym}
+
+The checker finds, for each condition, a pair of tests that differ in \emph{only}
+that bit and yield different results --- the formal definition of MC/DC. The
+``good'' 3-test set (\{11,10,01\}) achieves it for \code{a \&\& b}; the ``weak''
+set (\{11,00\}) doesn't, because flipping both conditions at once can't show
+either one \emph{independently}. This is the logic a coverage tool runs to certify
+Level A, and writing it makes MC/DC concrete rather than a buzzword.
+
+\followups
+\begin{enumerate}
+\item \emph{``Why does \{11,00\} fail MC/DC?''} $\rightarrow$ Both conditions
+  change together; neither is shown to independently flip the outcome.
+\item \emph{``How many tests for 3 conditions?''} $\rightarrow$ ~$N+1$ = 4 (vs 8
+  exhaustive), if the conditions are independent.
+\item \emph{``Short-circuit \code{\&\&} complicates this --- how?''}
+  $\rightarrow$ Some combinations are unreachable, affecting which pairs are
+  achievable.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Requirements traceability coverage}
+
+\textbf{Problem.} Given how many tests cover each requirement, compute the
+coverage percentage and find the first untested requirement.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Covered = requirements with $\ge 1$ test; report the percentage and the
+  first gap.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+static int trace_coverage_pct(const int *tests_per_req, int n) {
+    int covered = 0;
+    for (int i = 0; i < n; i++) if (tests_per_req[i] > 0) covered++;
+    return covered * 100 / n;
+}
+static int first_uncovered(const int *tests_per_req, int n) {
+    for (int i = 0; i < n; i++) if (tests_per_req[i] == 0) return i;
+    return -1;       /* all covered */
+}
+
+int main(void) {
+    int tpr[5] = {2, 1, 0, 3, 1};      /* requirement index 2 has no test */
+    printf("coverage=%d%% first_gap=%d\n",
+           trace_coverage_pct(tpr, 5), first_uncovered(tpr, 5));   /* 80% 2 */
+    return 0;
+}
+\end{cgym}
+
+This is the query at the heart of a traceability matrix: 4 of 5 requirements have
+a test (80\%), and requirement 2 is the gap. In a certifiable process you drive
+this to 100\% --- every requirement traced to at least one passing test (the
+resume's claim) --- and the gap report tells you exactly what to write next. The
+real tool (DOORS, or a managed SAP QM record) does this bidirectionally and links
+to pass/fail results, but the logic is this simple coverage check.
+
+\followups
+\begin{enumerate}
+\item \emph{``Also check the reverse direction.''} $\rightarrow$ Every \emph{test}
+  must trace to a requirement --- flag orphan tests too.
+\item \emph{``Weight by requirement criticality?''} $\rightarrow$ A Level-A
+  requirement with no test is worse than a Level-D one --- prioritise gaps.
+\item \emph{``Tie to pass/fail, not just existence.''} $\rightarrow$ A covered
+  requirement whose test \emph{fails} isn't satisfied --- track results, not just
+  links.
+\end{enumerate}
+\end{gymproblem}
+
+%=====================================================================
+\section{Link to Her Resume}
+%=====================================================================
+
+\begin{resumelink}
+\textbf{DO-178B Level A V\&V:} ``I verified DFCC flight software against DO-178B
+Level A requirements --- which means MC/DC structural coverage, requirements-based
+testing, and 100\% requirements-to-test traceability. I can explain why Level A
+needs MC/DC (branch coverage misses boolean-logic faults) and why coverage alone
+doesn't prove correctness --- validation and robustness testing cover what it
+can't.''
+
+\medskip
+\textbf{Test authoring \& traceability:} ``I author ATP/QTP procedures --- numbered
+steps with expected results --- and maintain the traceability matrix so every
+requirement maps to a passing test, managed in SAP QM under AS9100. A gap in the
+matrix is a defect in the process, not just a missing test.''
+
+\medskip
+\textbf{Defect \& failover verification:} ``My defect work is root-cause-driven
+(5-why to the true origin, then ask what else shares that cause) with regression
+re-test. For a timing/failover requirement I verify with fault injection on HIL,
+\emph{measure} the failover time, and back it with worst-case analysis --- not a
+single happy-path pass.''
+
+\medskip
+\small Maps directly to the resume: DO-178B Level A verification, white/black-box
+firmware testing, 100\% ATP/QTP traceability, SAP QM / AS9100, and CCDL
+integrity/timing/failover verification. Deep project scripting is Chapter 15,
+from \code{inputs/INTAKE.md} only.
+\end{resumelink}
+
+%=====================================================================
+\section{Self-Test Scorecard}
+%=====================================================================
+
+\begin{scorecard}
+\begin{enumerate}
+\item Verification vs validation, in one line each.
+\item Order statement / branch / MC/DC by strictness and say what each adds.
+\item What does MC/DC require for each condition, and roughly how many tests?
+\item What changes between DO-178B levels A, B, and C for coverage?
+\item What is requirements traceability and what does 100\% mean?
+\item ATP vs QTP?
+\item What is HIL testing good for, and one limit?
+\item Can fully-covered, all-passing software still be wrong? How?
+\item Outline the defect lifecycle and where 5-why fits.
+\item How would you verify a ``fail over within 50\,ms'' requirement rigorously?
+\end{enumerate}
+\end{scorecard}
+
+\begin{answerkey}
+\begin{enumerate}
+\item Verification: built it right (meets requirements). Validation: built the
+  right thing (meets the real need).
+\item Statement (every line) $<$ branch (both outcomes of each decision) $<$
+  MC/DC (each condition independently affects the outcome).
+\item A test pair differing only in that condition, with different outcomes;
+  ~$N+1$ tests for $N$ conditions.
+\item MC/DC required at A, decision (branch) at B, statement at C --- stricter
+  coverage for more severe failure consequences.
+\item Bidirectional links requirement$\leftrightarrow$design$\leftrightarrow$
+  code$\leftrightarrow$test; 100\% = every requirement has a passing test and
+  every test traces to a requirement.
+\item ATP accepts the product against requirements (numbered steps + expected
+  results); QTP qualifies it against the full spec/environment.
+\item Running real firmware against a real-time simulated plant for realistic/
+  fault scenarios; limited by model fidelity (unmodelled effects escape).
+\item Yes --- coverage proves it's right against the \emph{written} requirements;
+  a missing/wrong requirement, a timing race, or a validation gap can still make
+  it wrong.
+\item Report $\rightarrow$ triage $\rightarrow$ root-cause (5-why) $\rightarrow$
+  fix $\rightarrow$ re-test + regression $\rightarrow$ close, with traceability;
+  5-why finds the true cause before fixing.
+\item Fault-injection HIL test that \emph{measures} failover time across fault
+  types/boundaries, plus MC/DC on the detection logic and a worst-case timing
+  analysis --- not a single happy-path pass.
+\end{enumerate}
+\end{answerkey}
+
+\begin{partnote}
+\emph{End of Chapter 12, and of Part C (Systems \& Domain).} Next: Part D ---
+the \textbf{Coding Gym}, 60 graded Embedded C interview problems, pure practice
+for the coding rounds.
+\end{partnote}
