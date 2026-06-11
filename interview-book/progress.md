@@ -27,7 +27,7 @@ matter) on top of chapter content.
 | 3  | ch03_arm_architecture.tex | ARM & MCU Architecture | 50 | ~16 | [x] full topic scope; see budget note |
 | 4  | ch04_interrupts_timers_dma.tex | Interrupts, Timers & DMA | 40 | ~16 | [x] full topic scope; see budget note |
 | 5  | ch05_uart_rs_serial.tex | UART / RS232 / RS422 / RS485 | 35 | ~12 | [x] full topic scope |
-| 6  | ch06_spi_i2c.tex | SPI & I2C | 30 | — | [ ] |
+| 6  | ch06_spi_i2c.tex | SPI & I2C | 30 | ~10 | [x] full topic scope |
 | 7  | ch07_can_bus.tex | CAN Bus Deep Dive | 45 | — | [ ] |
 | 8  | ch08_avionics_buses.tex | Avionics Data Buses | 40 | — | [ ] |
 | 9  | ch09_rtos_realtime.tex | RTOS & Real-Time | 40 | — | [ ] |
@@ -40,8 +40,8 @@ matter) on top of chapter content.
 | 16 | ch16_behavioral_company.tex | Behavioral & Company Rounds | 20 | — | [ ] **BLOCKED — see note** |
 | 17 | ch17_mock_interviews.tex | 5 Full Mock Interviews | 20 | — | [ ] |
 
-**Current compiled size:** `build/book.pdf` = **84 pages** (title + TOC +
-Chapters 1–5), of the ~520 target.
+**Current compiled size:** `build/book.pdf` = **94 pages** (title + TOC +
+Chapters 1–6), of the ~520 target.
 
 ## Session log
 
@@ -159,6 +159,15 @@ to approach budget without filler.
   divider/error, frame time, parity fold, frame build, framing check, 9-bit
   address, DE guard time, majority vote, LIN checksum, baud-tolerance).
 - Compiled clean: 84 pp, zero LaTeX warnings (fixed one stray Unicode char).
+
+### Session 7 — Chapter 6 (SPI & I2C)
+- Full PLAN.md scope: SPI 4 modes (CPOL/CPHA), chip-select & multi-slave,
+  I2C start/stop/ACK, 7/10-bit addressing, clock stretching, arbitration,
+  pull-up sizing, SPI-vs-I2C-vs-UART selection.
+- Template complete: Primer (3 sections), 3-tier Q&A (8 + 9 + 4 = 21
+  questions), Coding Gym (9 problems), resume-link box, scorecard + answer key.
+- 9 host snippets verified clean under `gcc -Wall -Wextra -std=c11`.
+- Compiled clean: 94 pp, zero LaTeX warnings.
 
 ## Open flags / [VERIFY] / [NEEDS INTAKE] items
 - **Chapters 15 & 16 are HARD-BLOCKED.** Per PLAN.md Section 5 and CLAUDE.md,

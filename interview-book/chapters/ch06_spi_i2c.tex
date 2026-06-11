@@ -1,0 +1,768 @@
+% chapters/ch06_spi_i2c.tex — Chapter 6: SPI & I2C
+% Scope (PLAN.md): timing diagrams, 4 SPI modes (CPOL/CPHA), chip select,
+% I2C start/stop/ACK, addressing, clock stretching, arbitration, pull-up
+% sizing, multi-slave topologies, SPI vs I2C vs UART selection.
+% Budget 30 pp, mix 18 Q&A / 9 code / 3 concept.
+% All snippets verified gcc -Wall -Wextra -std=c11 (zero warnings).
+
+\chapter{SPI \& I2C}
+\label{ch:spi-i2c}
+
+\begin{partnote}
+\textbf{Scope} --- SPI clock polarity/phase (the four modes) $\rightarrow$
+chip-select and multi-slave topologies $\rightarrow$ I2C start/stop/ACK
+$\rightarrow$ 7- and 10-bit addressing $\rightarrow$ clock stretching
+$\rightarrow$ arbitration $\rightarrow$ pull-up sizing $\rightarrow$ choosing
+SPI vs I2C vs UART. These are the two short-range \emph{synchronous} buses
+(a shared clock), the counterpart to Chapter 5's asynchronous UART.
+\end{partnote}
+
+SPI and I2C both carry a clock alongside the data, so unlike UART there is no
+baud-matching --- the master clocks the slave. They trade differently: SPI is
+fast, simple, and pin-hungry; I2C is two-wire, addressable, and slower. Knowing
+\emph{which} to pick, and the timing rules that make each work, is the core of
+this chapter.
+
+%=====================================================================
+\section{Primer}
+%=====================================================================
+
+\subsection{SPI: full-duplex, four modes, one select per slave}
+
+SPI is a synchronous, full-duplex, master-driven bus with four lines:
+\textbf{SCLK} (clock), \textbf{MOSI} (master-out), \textbf{MISO} (master-in),
+and one \textbf{CS/SS} (chip-select, active-low) \emph{per slave}. On each clock
+the master shifts a bit out on MOSI and simultaneously shifts one in on MISO ---
+data goes both ways at once. Two settings define the timing: \textbf{CPOL}
+(clock idle level, 0 = idle low) and \textbf{CPHA} (which clock edge samples
+data: 0 = first edge, 1 = second edge). The four combinations are SPI
+\textbf{modes 0--3}; master and slave must use the same mode or every bit is
+mis-sampled. There's no addressing and no ACK --- selection is purely the CS
+line, so $N$ slaves need $N$ chip-selects (or a daisy-chain).
+
+\subsection{I2C: two wires, addressing, open-drain}
+
+I2C is a synchronous, half-duplex, two-wire bus: \textbf{SDA} (data) and
+\textbf{SCL} (clock), both \textbf{open-drain} with pull-up resistors (Chapter
+3), so any device can pull low and release. A transaction is framed by a
+\textbf{START} (SDA falls while SCL is high) and a \textbf{STOP} (SDA rises
+while SCL is high). The master sends a 7-bit (or 10-bit) \textbf{address} plus
+a read/write bit; the addressed slave \textbf{ACK}s by pulling SDA low on the
+9th clock. Every byte is acknowledged, so I2C has built-in delivery
+confirmation UART and SPI lack. Because it's open-drain and addressed, many
+devices share just two wires --- the trade is speed (standard 100\,kHz, fast
+400\,kHz, vs SPI's tens of MHz) and protocol complexity.
+
+\subsection{Clock stretching, arbitration, and pull-ups}
+
+Two I2C mechanisms matter. \textbf{Clock stretching}: a slow slave holds SCL low
+to pause the master until it's ready --- the master must tolerate this (and time
+out if a slave hangs SCL forever). \textbf{Arbitration}: if two masters start
+together, each watches SDA while driving; the one that wanted to send a 1 but
+sees 0 (another master pulled it low) loses and backs off, non-destructively ---
+the wired-AND bus makes this work. \textbf{Pull-up sizing}: the resistors and
+the bus capacitance form an RC that sets the rising-edge time; too large a
+resistor and the edge is too slow for 400\,kHz, too small and the open-drain
+sink current is excessive --- a few k$\Omega$ is typical, computed from the
+spec's rise-time limit and total bus capacitance.
+
+%=====================================================================
+\section{Q\&A Bank}
+%=====================================================================
+
+\tierbanner{Tier 1 --- Screening (phone / HR-technical)}%
+{Two to four sentences.}
+
+\question{Q1.1}{Name the SPI signals and what each does.}
+SCLK (clock from the master), MOSI (master-out slave-in), MISO (master-in
+slave-out), and one active-low CS/SS per slave. Each clock edge shifts a bit out
+on MOSI and in on MISO simultaneously --- SPI is full-duplex.
+
+\question{Q1.2}{Name the I2C signals and why they're open-drain.}
+SDA (data) and SCL (clock), both open-drain with pull-ups so any device can pull
+the line low or release it (high-Z). This wired-AND arrangement lets multiple
+devices share two wires without driver contention.
+
+\question{Q1.3}{What are CPOL and CPHA?}
+CPOL sets the clock's idle level (0 = idle low, 1 = idle high); CPHA selects
+which clock edge samples data (0 = first edge, 1 = second). Their four
+combinations are SPI modes 0--3.
+
+\question{Q1.4}{How does a master select a slave on SPI vs I2C?}
+SPI: assert that slave's dedicated chip-select line (one per slave). I2C: send
+the slave's address on the shared bus and the matching slave responds --- no
+extra wires per device.
+
+\question{Q1.5}{What is an I2C ACK?}
+After each byte the receiver pulls SDA low on the 9th clock to acknowledge
+receipt; leaving it high is a NACK (not acknowledged) --- used to signal ``no
+such device,'' an error, or ``last byte, stop.''
+
+\question{Q1.6}{Which is faster, SPI or I2C, and which uses fewer pins?}
+SPI is faster (tens of MHz, full-duplex) but needs four lines plus one CS per
+slave. I2C is slower (100\,k--400\,kHz typically) but needs only two wires for
+many devices.
+
+\question{Q1.7}{What frames an I2C transaction?}
+A START condition (SDA falling while SCL high) begins it and a STOP (SDA rising
+while SCL high) ends it. Between them are address and data bytes, each
+ACK/NACKed.
+
+\question{Q1.8}{Is SPI addressed?}
+No --- SPI has no addresses or ACKs; the master picks a slave purely by
+asserting its chip-select. Selection is hardware, not protocol.
+
+\tierbanner{Tier 2 --- Core technical (panel round)}%
+{A short paragraph.}
+
+\question{Q2.1}{Walk through the four SPI modes and the consequence of a
+mismatch.}
+Mode = (CPOL, CPHA): mode 0 (0,0) idle-low, sample on the rising (first) edge;
+mode 1 (0,1) idle-low, sample on falling (second); mode 2 (1,0) idle-high,
+sample on falling (first); mode 3 (1,1) idle-high, sample on rising (second).
+Master and slave must agree, because CPHA decides whether data is sampled on the
+edge that the other side is \emph{changing} it --- a mismatch samples mid-
+transition and every bit is wrong or shifted by half a clock. The datasheet of
+the slave fixes the mode; you configure the master to match.
+
+\question{Q2.2}{How do you connect multiple SPI slaves?}
+Two ways. \textbf{Independent CS}: shared SCLK/MOSI/MISO, one chip-select line
+per slave --- simple, but costs a GPIO per device and only one slave is selected
+at a time. \textbf{Daisy-chain}: slaves' MISO$\rightarrow$MOSI are chained so
+data shifts through all of them with one CS --- saves pins but needs device
+support and shifting the full chain length. Independent CS is by far the common
+choice; watch that unselected slaves tri-state MISO so they don't fight the bus.
+
+\question{Q2.3}{Explain the full I2C write transaction byte by byte.}
+START $\rightarrow$ address byte (7-bit address + W=0) $\rightarrow$ slave ACK
+$\rightarrow$ register/command byte $\rightarrow$ ACK $\rightarrow$ data byte(s)
+each followed by ACK $\rightarrow$ STOP. A read is START $\rightarrow$ address+W
+$\rightarrow$ register $\rightarrow$ repeated START $\rightarrow$ address+R
+$\rightarrow$ slave sends bytes, master ACKs each except NACKs the last
+$\rightarrow$ STOP. The \emph{repeated start} (no STOP between) keeps the bus so
+no other master interrupts the read.
+
+\question{Q2.4}{What is clock stretching and how must the master handle it?}
+A slave that needs more time holds SCL low after an ACK, pausing the clock until
+it releases. The master must \emph{not} assume it owns the clock timing --- it
+samples whether SCL actually rose before proceeding, and applies a timeout so a
+slave that hangs SCL low forever doesn't lock the bus indefinitely (a common
+recovery is clocking SCL manually to free a stuck slave). Hardware I2C
+peripherals handle stretching automatically; bit-banged ones must poll SCL.
+
+\question{Q2.5}{How does I2C multi-master arbitration work?}
+All masters can start; each drives SDA and simultaneously reads it back. Because
+the bus is wired-AND, a master that tries to send a 1 but reads 0 knows another
+master pulled it low --- it has lost arbitration and immediately stops driving,
+non-destructively (the winning master's transfer is unaffected and continues).
+Arbitration is decided bit by bit on the address/data, so the lower-address (or
+the one sending more zeros first) wins. No data is corrupted.
+
+\question{Q2.6}{How do you size I2C pull-up resistors?}
+The pull-up and the total bus capacitance form an RC; the resistor must be small
+enough that the rising edge reaches the high threshold within the spec's
+rise-time limit (1000\,ns for standard mode, 300\,ns for fast mode), and large
+enough that the low-side sink current (V/R) stays within the open-drain output's
+rating (3\,mA). So $R_{\min}=V_{cc}/I_{\text{sink}}$ and $R_{\max}$ from the
+rise-time/capacitance limit --- typically landing a few k$\Omega$ (e.g.\
+4.7\,k$\Omega$ at 100\,kHz, 2.2\,k$\Omega$ at 400\,kHz). More devices = more
+capacitance = smaller resistor needed.
+
+\question{Q2.7}{Compute the SPI clock from the prescaler.}
+On most MCUs SPI SCLK = $f_{\text{PCLK}} / 2^{(\text{presc}+1)}$, i.e.\
+prescaler values select divide-by-2, 4, 8, \ldots\ So an 84\,MHz PCLK with
+prescaler index 2 gives $84/8 = 10.5$\,MHz. You pick the highest divider whose
+result stays within the slave's maximum SCLK \emph{and} within the board's
+signal-integrity limit (long traces ring at high SCLK). Unlike UART there's no
+``error'' --- the slave is clocked by the master, so any rate up to its max
+works.
+
+\question{Q2.8}{When do you choose SPI vs I2C vs UART?}
+\textbf{UART} for asynchronous, point-to-point, no-shared-clock links
+(consoles, modules, RS422). \textbf{SPI} when you need speed and full-duplex and
+can spare the pins --- ADCs, displays, flash, radios. \textbf{I2C} when you have
+many slow peripherals and want minimal wiring --- sensors, EEPROMs, config
+chips. The quick decision: async peer $\rightarrow$ UART; high throughput
+$\rightarrow$ SPI; pin-constrained many-device bus $\rightarrow$ I2C.
+
+\question{Q2.9}{Why does I2C have an inherent speed ceiling that SPI doesn't?}
+Open-drain drive can only \emph{pull} low; the rising edge is restored passively
+by the pull-up through the bus capacitance, so the RC rise time bounds the clock
+--- you can't go faster than the line can rise. SPI is push-pull (actively
+drives both edges) and point-to-point with short, defined loading, so it clocks
+much faster. That same open-drain property is what gives I2C its multi-device,
+wired-AND, arbitration-friendly nature --- speed is the trade for
+shareability.
+
+\tierbanner{Tier 3 --- Trap \& depth (principal-engineer level)}%
+{A paragraph plus the trap.}
+
+\question{Q3.1}{Your SPI reads are consistently shifted by one bit or return
+garbage on a new slave. What do you check, in order?}
+First the \textbf{mode}: the slave's datasheet CPOL/CPHA must match the master
+--- a CPHA mismatch samples on the changing edge and shifts/garbles every bit.
+Then \textbf{bit order} (MSB-first vs LSB-first), \textbf{word size} (8 vs 16
+bit), and \textbf{CS timing} (some slaves require CS to frame each word, or a
+setup time before the first clock). Then signal integrity: too-high SCLK on long
+traces rings and the slave mis-samples. \trap the reflexive ``lower the clock''
+sometimes helps signal integrity and masks a real mode mismatch --- the
+disciplined order is mode $\rightarrow$ bit order $\rightarrow$ word size
+$\rightarrow$ CS framing $\rightarrow$ scope the SCLK/MOSI/MISO at the slave.
+This is the same scope-at-the-receiver method as the RS422 chapter.
+
+\question{Q3.2}{An I2C bus is ``stuck'' --- SDA or SCL held low and no
+transactions complete. Diagnose and recover.}
+A slave can hold SDA low if it was mid-byte when the master was reset (it's
+waiting to finish clocking out a byte), or hold SCL low via clock stretching
+that never releases (a hung slave). Recovery: the master manually toggles SCL up
+to 9 clocks to let the slave finish its byte and release SDA, then issues a STOP
+to resync the bus; if SCL itself is stuck, the slave or a bus buffer has failed
+and only a power cycle / reset line clears it. \trap candidates try to ``just
+re-init the I2C peripheral,'' which doesn't move SCL and so doesn't free a slave
+mid-byte. The correct recovery is the manual 9-clock bus-clear sequence ---
+knowing it signals real I2C field experience.
+
+\question{Q3.3}{Why can a single missing or wrong-valued I2C pull-up cause
+intermittent, capacitance-dependent failures?}
+The pull-up sets the rising-edge time through the bus RC; if it's too weak (too
+large) or absent (relying on a weak internal pull-up), the edge is too slow and
+the receiver samples before the line crosses the high threshold --- worse as you
+add devices (more capacitance) or raise the clock to 400\,kHz, so it ``works on
+the bench, fails on the full board.'' Too strong (too small) overloads the
+open-drain low-side and may not reach a valid low. \trap the trap is treating
+pull-ups as ``any value works'' --- they're a computed RC trade against bus
+capacitance and clock, and a marginal value is a textbook source of
+intermittent, layout-dependent I2C bugs that a scope (slow rise time) reveals
+instantly.
+
+\question{Q3.4}{SPI has no ACK and no addressing --- how do you build a reliable
+multi-slave SPI system, and what failure modes must you guard?}
+Because SPI gives no delivery confirmation, reliability is layered on top:
+per-transaction framing with a command/length/CRC so the master can verify the
+slave's response, a known ``idle/dummy'' pattern to detect an absent or wedged
+slave (all-0xFF or all-0x00 reads usually mean MISO floating / slave not
+driving), and careful CS sequencing so exactly one slave drives MISO at a time
+(an unselected slave that doesn't tri-state corrupts the bus). \trap the trap is
+trusting raw SPI bytes as if they were acknowledged --- they aren't, so a
+disconnected or mis-clocked slave returns plausible-looking garbage. The robust
+design validates a CRC/known-pattern in every response and treats all-ones/all-
+zeros as ``no slave,'' exactly the frame-integrity discipline from Chapter 5.
+
+%=====================================================================
+\section{Coding Gym}
+%=====================================================================
+
+\begin{partnote}
+Nine host-compilable problems (verified under
+\code{gcc -Wall -Wextra -std=c11}) covering the bit/protocol arithmetic of SPI
+and I2C bring-up: mode decode, software transfer, clock dividers, address
+encoding, ACK logic, clock-stretch handling, and bus selection.
+\end{partnote}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Decode an SPI mode to CPOL/CPHA}
+
+\textbf{Problem.} Convert an SPI mode number (0--3) into its CPOL and CPHA
+bits.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Mode = (CPOL$<<$1) $|$ CPHA.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+static void spi_mode(int mode, int *cpol, int *cpha) {
+    *cpol = (mode >> 1) & 1;
+    *cpha = mode & 1;
+}
+
+int main(void) {
+    int cpol, cpha;
+    spi_mode(3, &cpol, &cpha);
+    printf("mode3 cpol=%d cpha=%d\n", cpol, cpha);   /* 1 1 */
+    return 0;
+}
+\end{cgym}
+
+Mode 3 is CPOL=1 (idle high), CPHA=1 (sample second edge). The first thing you
+do bringing up an SPI slave is read its datasheet timing diagram, derive the
+mode, and set the master to match --- the \#1 cause of garbled SPI is a mode
+mismatch (Q3.1).
+
+\followups
+\begin{enumerate}
+\item \emph{``Build the reverse: mode from CPOL/CPHA.''} $\rightarrow$
+  \code{(cpol<<1)|cpha}.
+\item \emph{``Which edge does mode 0 sample?''} $\rightarrow$ Rising (first)
+  edge, clock idle low.
+\item \emph{``Two slaves need different modes on one bus --- handling?''}
+  $\rightarrow$ Reconfigure the master's mode per CS, or use separate SPI
+  peripherals.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Software SPI byte transfer (MSB-first)}
+
+\textbf{Problem.} Model a full-duplex 8-bit SPI exchange: shift a byte out
+while shifting one in, MSB-first.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Loop bits 7..0; build the input by shifting in the slave's bit each clock.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+/* models the simultaneous shift: returns the byte clocked in from the slave */
+static uint8_t spi_xfer_mode0(uint8_t mosi, uint8_t slave_shift) {
+    uint8_t miso = 0;
+    for (int i = 7; i >= 0; i--) {        /* MSB first */
+        int out = (mosi >> i) & 1; (void)out;   /* would drive MOSI here */
+        int in  = (slave_shift >> i) & 1;       /* sample MISO on the edge */
+        miso = (uint8_t)((miso << 1) | in);
+    }
+    return miso;
+}
+
+int main(void) {
+    printf("in=0x%02X\n", spi_xfer_mode0(0xFF, 0xA5));   /* 0xA5 */
+    return 0;
+}
+\end{cgym}
+
+The defining SPI property is here: \emph{every clock both transmits and
+receives}. A real bit-bang drives MOSI then toggles SCLK then samples MISO at
+the CPHA-defined edge; a hardware SPI does it in one register write. MSB-first
+is the common default --- LSB-first slaves exist and a wrong bit order reverses
+every byte.
+
+\followups
+\begin{enumerate}
+\item \emph{``Add CPHA: when do you sample vs change?''} $\rightarrow$ CPHA=0
+  sample on the first edge (change before SCLK starts); CPHA=1 sample on the
+  second.
+\item \emph{``A read-only register --- what do you send?''} $\rightarrow$ Dummy
+  bytes (0x00/0xFF) to generate clocks; the data comes back on MISO.
+\item \emph{``16-bit transfers?''} $\rightarrow$ Same loop to 16; or two 8-bit
+  transfers with CS held.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{SPI clock from the prescaler}
+
+\textbf{Problem.} Compute SCLK from the peripheral clock and a power-of-two
+prescaler index.
+
+\textbf{Hints.}
+\begin{itemize}
+\item SCLK = PCLK / $2^{(\text{presc}+1)}$.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint32_t spi_sclk(uint32_t pclk, int presc) {
+    return pclk >> (presc + 1);     /* /2, /4, /8, ... */
+}
+
+int main(void) {
+    printf("sclk=%u\n", spi_sclk(84000000u, 2));   /* 84MHz/8 = 10.5 MHz */
+    return 0;
+}
+\end{cgym}
+
+Prescaler index 2 means divide-by-8, giving 10.5\,MHz. You pick the fastest rate
+within the slave's max SCLK and the board's signal integrity. Unlike UART there
+is no baud error to worry about --- the master clocks the slave directly --- but
+too-high SCLK on long traces causes ringing and mis-sampling, the SPI analogue
+of an unterminated line.
+
+\followups
+\begin{enumerate}
+\item \emph{``Slave max is 8\,MHz --- which prescaler from 84\,MHz?''}
+  $\rightarrow$ presc=3 ($/16$ = 5.25\,MHz); presc=2 ($/8$ = 10.5) exceeds it.
+\item \emph{``Why no baud error like UART?''} $\rightarrow$ The clock is shared,
+  so there's no sampling drift between ends.
+\item \emph{``Faster than the slave's max --- symptom?''} $\rightarrow$
+  Corrupt/garbled reads; back off the prescaler.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{I2C 7-bit address byte}
+
+\textbf{Problem.} Form the first I2C byte from a 7-bit address and the
+read/write direction.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Address in bits 7..1, R/W in bit 0 (1 = read).
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint8_t i2c_addr_byte(uint8_t addr7, int read) {
+    return (uint8_t)((addr7 << 1) | (read ? 1 : 0));
+}
+
+int main(void) {
+    printf("read=0x%02X write=0x%02X\n",
+           i2c_addr_byte(0x48, 1), i2c_addr_byte(0x48, 0));   /* 0x91 0x90 */
+    return 0;
+}
+\end{cgym}
+
+Address 0x48 (a common temperature-sensor address) becomes 0x90 for a write and
+0x91 for a read. A frequent confusion is the ``8-bit vs 7-bit address''
+mismatch: datasheets sometimes quote the already-shifted 8-bit value (0x90),
+sometimes the 7-bit (0x48) --- mixing them addresses the wrong device. Always
+know which form your API expects.
+
+\followups
+\begin{enumerate}
+\item \emph{``Datasheet says address 0x90 --- what's the 7-bit value?''}
+  $\rightarrow$ \code{0x90 >> 1 = 0x48}.
+\item \emph{``Reserved addresses?''} $\rightarrow$ 0x00--0x07 and 0x78--0x7F are
+  reserved (general call, 10-bit, etc.).
+\item \emph{``Scan the bus for devices.''} $\rightarrow$ Address each 0x08--0x77
+  and watch for an ACK.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{I2C 10-bit addressing}
+
+\textbf{Problem.} Build the two address bytes for 10-bit I2C addressing.
+
+\textbf{Hints.}
+\begin{itemize}
+\item First byte: \code{11110} prefix + top 2 address bits + R/W.
+\item Second byte: the low 8 address bits.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static void i2c_addr10(uint16_t addr10, int read, uint8_t *b1, uint8_t *b2) {
+    *b1 = (uint8_t)(0xF0 | (((addr10 >> 8) & 0x3) << 1) | (read ? 1 : 0));
+    *b2 = (uint8_t)(addr10 & 0xFF);
+}
+
+int main(void) {
+    uint8_t b1, b2;
+    i2c_addr10(0x2A5, 0, &b1, &b2);
+    printf("b1=0x%02X b2=0x%02X\n", b1, b2);   /* 0xF4 0xA5 */
+    return 0;
+}
+\end{cgym}
+
+The \code{11110xx} prefix tells slaves a 10-bit address follows; the top two
+address bits ride in the first byte, the low eight in the second. 10-bit
+addressing is rare (most devices are 7-bit) but appears when a bus needs more
+than 112 usable addresses; recognising the \code{0xF0} prefix on a logic
+analyser is the tell.
+
+\followups
+\begin{enumerate}
+\item \emph{``Why is 7-bit far more common?''} $\rightarrow$ 112 usable
+  addresses suffice for most boards, with less protocol overhead.
+\item \emph{``A 10-bit read uses how many phases?''} $\rightarrow$ Write the two
+  address bytes, repeated START, then the first byte again with R=1.
+\item \emph{``Mixed 7- and 10-bit on one bus?''} $\rightarrow$ Allowed --- the
+  \code{11110} prefix is reserved so 7-bit devices ignore it.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{I2C SCL frequency from timing registers}
+
+\textbf{Problem.} Compute the SCL clock from the peripheral clock, prescaler,
+and the low/high period counts.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Period = (SCLL+1) + (SCLH+1) prescaled ticks; SCL = PCLK / (presc $\times$
+  period).
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint32_t i2c_scl_hz(uint32_t pclk, uint32_t presc, uint32_t scll, uint32_t sclh) {
+    uint32_t tpresc = presc + 1u;
+    return pclk / (tpresc * ((scll + 1u) + (sclh + 1u)));
+}
+
+int main(void) {
+    printf("scl=%u Hz\n", i2c_scl_hz(8000000u, 1u, 0x9u, 0x9u));   /* 200000 */
+    return 0;
+}
+\end{cgym}
+
+The SCL period is the programmed low time plus high time (each in prescaled
+ticks); here 8\,MHz with prescaler 2 and SCLL=SCLH=9 gives
+$8\text{M}/(2\times20) = 200$\,kHz. Standard mode is 100\,kHz, fast mode
+400\,kHz --- and the high/low split isn't 50/50 in the spec (the low period is
+longer), which is why real timing registers separate SCLL and SCLH. Set them
+from the datasheet's $t_{\text{LOW}}/t_{\text{HIGH}}$ minimums.
+
+\followups
+\begin{enumerate}
+\item \emph{``Why is the low period longer than the high?''} $\rightarrow$ The
+  spec's $t_{\text{LOW}} > t_{\text{HIGH}}$ to allow slow rising edges and
+  setup.
+\item \emph{``400\,kHz from 8\,MHz --- pick values.''} $\rightarrow$ Reduce the
+  period count so PCLK/(presc$\times$period)=400k.
+\item \emph{``Rise time eats into the high period --- effect?''} $\rightarrow$
+  Effective SCL high shrinks; weak pull-ups can violate timing.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Master ACK/NACK logic on a multi-byte read}
+
+\textbf{Problem.} On an I2C read of \code{total} bytes, decide whether the
+master ACKs after byte \code{i}.
+
+\textbf{Hints.}
+\begin{itemize}
+\item ACK every byte except the last; NACK the last to tell the slave to stop.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+static int master_should_ack(int byte_index, int total) {
+    return byte_index < (total - 1);     /* NACK only the final byte */
+}
+
+int main(void) {
+    printf("ack[0/3]=%d ack[2/3]=%d\n",
+           master_should_ack(0, 3), master_should_ack(2, 3));   /* 1 0 */
+    return 0;
+}
+\end{cgym}
+
+During a read the master ACKs each received byte to say ``send the next,'' then
+\textbf{NACKs} the last one to tell the slave ``I'm done, release SDA'' before
+issuing STOP. Forgetting the final NACK is a classic bug: the slave keeps
+driving and you either read an extra byte or the STOP collides with the slave
+still holding SDA --- a wedged bus (Q3.2).
+
+\followups
+\begin{enumerate}
+\item \emph{``What if you ACK the last byte too?''} $\rightarrow$ The slave
+  prepares another byte and may hold the bus; STOP can be mis-issued.
+\item \emph{``Reading an unknown-length stream?''} $\rightarrow$ Some devices
+  use a length byte first, or you NACK when your buffer is full.
+\item \emph{``Who ACKs on a write?''} $\rightarrow$ The \emph{slave} ACKs each
+  byte the master sends.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Wait out clock stretching (with timeout)}
+
+\textbf{Problem.} A slave may hold SCL low; scan sampled SCL states and return
+when (or whether) it releases.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Return the index where SCL is first high (released); $-1$ if it never
+  releases (timeout).
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+static int wait_scl_release(const int *scl_samples, int n) {
+    for (int i = 0; i < n; i++)
+        if (scl_samples[i]) return i;     /* SCL went high -> slave released */
+    return -1;                            /* never released -> timeout */
+}
+
+int main(void) {
+    int scl[] = {0, 0, 1, 1};             /* low, low, then released */
+    printf("released@%d\n", wait_scl_release(scl, 4));   /* 2 */
+    return 0;
+}
+\end{cgym}
+
+After the master drives SCL high it must \emph{verify} SCL actually rose ---
+a stretching slave holds it low until ready. The master proceeds only once it
+reads SCL high, and bounds the wait with a timeout so a hung slave doesn't lock
+the bus forever (on timeout, trigger the 9-clock bus-clear recovery). This
+SCL-read-back is exactly why bit-banged I2C must sample SCL, not just drive it.
+
+\followups
+\begin{enumerate}
+\item \emph{``What do you do on timeout?''} $\rightarrow$ Bus-clear: toggle SCL
+  up to 9 times, then STOP; if still stuck, reset the slave.
+\item \emph{``Does hardware I2C handle stretching?''} $\rightarrow$ Yes, it
+  waits automatically, but you still set a timeout.
+\item \emph{``Why might a slave stretch?''} $\rightarrow$ It needs time (ADC
+  conversion, flash write) before the next byte.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Choose the bus from constraints}
+
+\textbf{Problem.} Given whether pins are scarce, throughput is high, and the
+peer is asynchronous, pick UART, SPI, or I2C.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Async peer $\rightarrow$ UART; high speed $\rightarrow$ SPI; pin-scarce
+  many-device $\rightarrow$ I2C.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+typedef enum { BUS_I2C, BUS_SPI, BUS_UART } bus_t;
+
+static bus_t choose_bus(int pins_scarce, int high_speed, int async_peer) {
+    if (async_peer) return BUS_UART;      /* no shared clock available */
+    if (high_speed) return BUS_SPI;       /* fastest, full-duplex      */
+    if (pins_scarce) return BUS_I2C;      /* two wires, many devices   */
+    return BUS_SPI;                       /* default for on-board peripherals */
+}
+
+int main(void) {
+    printf("%d %d %d\n",
+           choose_bus(1, 0, 0),   /* I2C  -> 0 */
+           choose_bus(0, 1, 0),   /* SPI  -> 1 */
+           choose_bus(0, 0, 1));  /* UART -> 2 */
+    return 0;
+}
+\end{cgym}
+
+This encodes the selection logic an interviewer wants you to reason aloud: a
+console or an off-board module with its own clock domain is UART; a fast ADC or
+display is SPI; a cluster of slow sensors/EEPROMs on two wires is I2C. The
+decision is about clocking model, throughput, pin budget, and device count ---
+not a one-size answer.
+
+\followups
+\begin{enumerate}
+\item \emph{``High speed \emph{and} pin-scarce?''} $\rightarrow$ Tension ---
+  consider QSPI, or accept I2C's limit, or spend the pins on SPI.
+\item \emph{``Many devices but need speed?''} $\rightarrow$ SPI with several
+  chip-selects, or partition onto multiple buses.
+\item \emph{``Why is UART the choice for an async peer?''} $\rightarrow$ No
+  shared clock line is needed; both ends self-clock at the agreed baud.
+\end{enumerate}
+\end{gymproblem}
+
+%=====================================================================
+\section{Link to Her Resume}
+%=====================================================================
+
+\begin{resumelink}
+\textbf{Bus selection \& bring-up:} ``On the autopilot and supporting boards I
+work across SPI, I2C, UART and the differential buses --- I choose by clocking
+model and pin budget, and I bring an SPI slave up by matching CPOL/CPHA from its
+datasheet before anything else, scoping SCLK/MOSI/MISO at the device when reads
+are garbled.''
+
+\medskip
+\textbf{I2C field recovery:} ``A stuck I2C bus usually means a slave caught
+mid-byte or stretching SCL forever --- I recover with the manual 9-clock
+bus-clear and a STOP, not just a peripheral re-init, and I check pull-up sizing
+against bus capacitance when failures are intermittent.''
+
+\medskip
+\small Maps to the multi-protocol board bring-up and oscilloscope-based
+root-cause work on the resume (autopilot boards, supporting boards, lab
+instruments). Keep claims to what the resume states; deep project scripting is
+Chapter 15, from \code{inputs/INTAKE.md} only.
+\end{resumelink}
+
+%=====================================================================
+\section{Self-Test Scorecard}
+%=====================================================================
+
+\begin{scorecard}
+\begin{enumerate}
+\item Name the four SPI lines; which two carry data and in which direction?
+\item What do CPOL and CPHA set, and what happens on a mode mismatch?
+\item How does a master select a slave on SPI vs I2C?
+\item Draw (in words) a full I2C write transaction.
+\item What is clock stretching and how must the master handle it?
+\item Explain I2C multi-master arbitration --- why is it non-destructive?
+\item How do you size I2C pull-ups (the two bounds)?
+\item Why does I2C have a speed ceiling that SPI doesn't?
+\item On an I2C read, when does the master NACK and why?
+\item Pick a bus: a cluster of slow sensors on two wires --- which and why?
+\end{enumerate}
+\end{scorecard}
+
+\begin{answerkey}
+\begin{enumerate}
+\item SCLK, MOSI, MISO, CS; MOSI (master$\rightarrow$slave) and MISO
+  (slave$\rightarrow$master) carry data, full-duplex.
+\item CPOL = idle clock level, CPHA = sampling edge; a mismatch samples on the
+  changing edge $\rightarrow$ every bit garbled/shifted.
+\item SPI: assert the slave's dedicated CS. I2C: send the slave's address on the
+  shared bus.
+\item START $\rightarrow$ addr+W $\rightarrow$ ACK $\rightarrow$ register
+  $\rightarrow$ ACK $\rightarrow$ data $\rightarrow$ ACK $\rightarrow$ STOP.
+\item A slave holds SCL low to pause the master; the master must wait until SCL
+  actually rises, with a timeout for a hung slave.
+\item Each master reads SDA while driving; one that sends 1 but reads 0 lost and
+  backs off --- the wired-AND bus leaves the winner's data intact.
+\item $R_{\min}=V_{cc}/I_{\text{sink}}$ (low-side current limit);
+  $R_{\max}$ from the rise-time/capacitance limit --- typically a few
+  k$\Omega$.
+\item Open-drain only pulls low; the rising edge is restored passively through
+  the RC, so rise time bounds the clock. SPI push-pull drives both edges.
+\item It NACKs the final byte to tell the slave to stop driving before STOP;
+  ACKing it would make the slave send/hold more.
+\item I2C --- two wires for many addressable low-speed devices, minimal pins.
+\end{enumerate}
+\end{answerkey}
+
+\begin{partnote}
+\emph{End of Chapter 6.} Next: \textbf{CAN Bus Deep Dive} --- frame fields,
+arbitration, bit stuffing, error states, ACK, bit timing, and drone-servo
+control over CAN (the lab work on the resume).
+\end{partnote}
