@@ -26,7 +26,7 @@ matter) on top of chapter content.
 | 2  | ch02_memory_toolchain.tex | Memory & Toolchain | 30 | ~14 | [x] full topic scope; see budget note |
 | 3  | ch03_arm_architecture.tex | ARM & MCU Architecture | 50 | ~16 | [x] full topic scope; see budget note |
 | 4  | ch04_interrupts_timers_dma.tex | Interrupts, Timers & DMA | 40 | ~16 | [x] full topic scope; see budget note |
-| 5  | ch05_uart_rs_serial.tex | UART / RS232 / RS422 / RS485 | 35 | — | [ ] |
+| 5  | ch05_uart_rs_serial.tex | UART / RS232 / RS422 / RS485 | 35 | ~12 | [x] full topic scope |
 | 6  | ch06_spi_i2c.tex | SPI & I2C | 30 | — | [ ] |
 | 7  | ch07_can_bus.tex | CAN Bus Deep Dive | 45 | — | [ ] |
 | 8  | ch08_avionics_buses.tex | Avionics Data Buses | 40 | — | [ ] |
@@ -40,8 +40,8 @@ matter) on top of chapter content.
 | 16 | ch16_behavioral_company.tex | Behavioral & Company Rounds | 20 | — | [ ] **BLOCKED — see note** |
 | 17 | ch17_mock_interviews.tex | 5 Full Mock Interviews | 20 | — | [ ] |
 
-**Current compiled size:** `build/book.pdf` = **72 pages** (title + TOC +
-Chapters 1–4 = all of Part A), of the ~520 target.
+**Current compiled size:** `build/book.pdf` = **84 pages** (title + TOC +
+Chapters 1–5), of the ~520 target.
 
 ## Session log
 
@@ -148,6 +148,17 @@ Chapters 1–4 = all of Part A), of the ~520 target.
 warnings. Cumulative budget for Part A was 190 pp; running lighter (see the
 recurring density note) — a later pass can widen Q&A tiers / add gym problems
 to approach budget without filler.
+
+### Session 6 — Chapter 5 (UART / RS232 / RS422 / RS485) — opens Part B
+- Full PLAN.md scope: frame anatomy, baud math & error %, parity/framing/
+  overrun, flow control, single-ended vs differential, RS232/422/485 compare,
+  why flight computers use RS422, termination & noise.
+- Template complete: Primer (3 sections), 3-tier Q&A (10 + 10 + 5 = 25
+  questions), Coding Gym (10 problems), resume-link box, scorecard + answer key.
+- 10 host snippets verified clean under `gcc -Wall -Wextra -std=c11` (baud
+  divider/error, frame time, parity fold, frame build, framing check, 9-bit
+  address, DE guard time, majority vote, LIN checksum, baud-tolerance).
+- Compiled clean: 84 pp, zero LaTeX warnings (fixed one stray Unicode char).
 
 ## Open flags / [VERIFY] / [NEEDS INTAKE] items
 - **Chapters 15 & 16 are HARD-BLOCKED.** Per PLAN.md Section 5 and CLAUDE.md,

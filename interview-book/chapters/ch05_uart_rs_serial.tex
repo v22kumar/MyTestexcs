@@ -1,0 +1,900 @@
+% chapters/ch05_uart_rs_serial.tex — Chapter 5: UART / RS232 / RS422 / RS485
+% Scope (PLAN.md): frame anatomy, baud math & error %, parity/framing/overrun
+% errors, flow control, single-ended vs differential, RS422 vs RS485 vs RS232,
+% why flight computers use RS422 (her daily interface), termination & noise.
+% Budget 35 pp, mix 22 Q&A / 10 code / 3 concept.
+% All snippets verified gcc -Wall -Wextra -std=c11 (zero warnings).
+
+\chapter{UART / RS232 / RS422 / RS485}
+\label{ch:uart-serial}
+
+\begin{partnote}
+\textbf{Part B opens here.} \textbf{Scope} --- asynchronous frame anatomy
+$\rightarrow$ baud-rate arithmetic and error percentage $\rightarrow$
+parity/framing/overrun errors $\rightarrow$ flow control $\rightarrow$
+single-ended vs differential signalling $\rightarrow$ RS232 vs RS422 vs RS485
+$\rightarrow$ why flight computers use RS422 $\rightarrow$ termination and
+noise. This is the candidate's \emph{daily} interface --- RS422 Embedded C on
+the DFCC at TASL --- so it must be bulletproof.
+\end{partnote}
+
+The terms get blurred in casual use, so fix them first: \textbf{UART} is the
+\emph{controller} (the on-chip peripheral and the asynchronous framing);
+\textbf{RS232/RS422/RS485} are \emph{electrical standards} (voltage levels and
+single-ended-vs-differential signalling) that a line driver applies to that
+same framing. A UART speaks bytes; a transceiver decides the volts on the wire.
+Conflating them is the first thing an interviewer probes.
+
+%=====================================================================
+\section{Primer}
+%=====================================================================
+
+\subsection{The asynchronous frame}
+
+UART is \emph{asynchronous}: there is no shared clock, so each side is
+pre-configured to the same \textbf{baud rate} and agrees on a frame format.
+The line idles high. A character is sent as: one \textbf{start} bit (a
+high$\rightarrow$low edge that the receiver locks onto), then the
+\textbf{data} bits \emph{least-significant-bit first} (5--9, usually 8), an
+optional \textbf{parity} bit, then one or more \textbf{stop} bits (line
+returns high). The shorthand ``8N1'' means 8 data bits, No parity, 1 stop bit
+--- 10 bit-times per byte once the start and stop are counted. The receiver
+samples each bit near its centre (typically at the 8th of 16 oversampling
+ticks), so both ends must hold the same baud closely enough that the sampling
+point hasn't drifted by the last bit.
+
+\subsection{Baud, error, and why it must match}
+
+Baud rate is bits per second on the wire (for UART, symbol rate = bit rate).
+The peripheral derives it by dividing the clock: on an STM32, the 16$\times$
+oversampling divider \code{USARTDIV} satisfies
+$\text{baud}=f_{\text{ck}}/(16\cdot\text{USARTDIV})$, and the register
+\code{BRR}$=f_{\text{ck}}/\text{baud}$ to the nearest integer. Integer rounding
+means the \emph{actual} baud differs slightly from nominal, and that error
+accumulates across the frame: by the stop bit the sampling point has shifted by
+(error)$\times$(bits). The rule of thumb is the cumulative error must stay
+under about half a bit, so each end's baud error should be well under a few
+percent --- which is why an accurate \textbf{crystal} (Chapter 3 \code{HSE}),
+not the internal RC, is used for reliable UART.
+
+\subsection{Electrical standards: single-ended vs differential}
+
+\textbf{RS232} is single-ended: one wire per direction, referenced to ground,
+swinging roughly $\pm$3--15\,V (idle/mark is negative). Simple, short-range
+(a few metres), one driver and one receiver. \textbf{RS422} and \textbf{RS485}
+are \emph{differential}: each signal is a twisted pair (A/B), and the receiver
+reads the \emph{difference} between the two lines. Common-mode noise picked up
+on the cable hits both wires equally and cancels at the differential receiver,
+so differential links run far (over a kilometre) and fast with strong noise
+immunity --- the reason avionics and industrial buses use them. \textbf{RS422}
+is point-to-point / multi-drop with one driver and up to ten receivers
+(full-duplex, separate TX and RX pairs). \textbf{RS485} is multi-point: up to
+32 (or more) drivers \emph{and} receivers share one pair (half-duplex), so
+drivers must be tri-stated and turn-taking is managed in software. This is why
+flight computers favour RS422: differential noise immunity, deterministic
+point-to-point links, and full-duplex separation of command and telemetry.
+
+%=====================================================================
+\section{Q\&A Bank}
+%=====================================================================
+
+\tierbanner{Tier 1 --- Screening (phone / HR-technical)}%
+{Two to four sentences. Serial basics --- expected cold from anyone claiming
+embedded comms.}
+
+\question{Q1.1}{What is the difference between a UART and RS232/RS422/RS485?}
+The UART is the digital peripheral that frames bytes asynchronously
+(start/data/parity/stop) at TTL levels; RS232/RS422/RS485 are electrical
+standards that a line driver/transceiver uses to put those bits on a cable at
+defined voltages and (for 422/485) differentially. Same framing, different
+physical layer.
+
+\question{Q1.2}{Describe a standard UART frame.}
+Idle-high line, then a start bit (falling edge), 5--9 data bits sent
+LSB-first, an optional parity bit, and 1--2 stop bits returning the line high.
+``8N1'' is 8 data bits, no parity, 1 stop --- 10 bit-times per byte.
+
+\question{Q1.3}{What does ``baud rate'' mean and why must both ends agree?}
+It's the number of signalling bits per second on the wire. Because UART is
+asynchronous with no shared clock, each side times its bits from its own clock
+at the agreed baud; if they differ too much, the receiver's sampling point
+drifts off the bit and data corrupts.
+
+\question{Q1.4}{Single-ended vs differential signalling --- one line.}
+Single-ended (RS232) measures one wire against ground; differential
+(RS422/485) measures the difference between two wires, so common-mode noise
+cancels --- giving far longer range and far better noise immunity.
+
+\question{Q1.5}{RS422 vs RS485 in one breath?}
+RS422 is differential, typically point-to-point/multi-drop, full-duplex (one
+driver, separate TX/RX pairs). RS485 is differential multi-point, half-duplex
+(many drivers share one pair), so drivers must be enabled only when
+transmitting.
+
+\question{Q1.6}{What is parity and what can it catch?}
+An extra bit set so the total number of 1s is even (even parity) or odd (odd
+parity). It detects any single-bit (odd number of) error in the frame but
+cannot detect two-bit errors or correct anything --- a weak, cheap check.
+
+\question{Q1.7}{Name three UART receive errors.}
+Framing error (stop bit sampled as 0 --- baud mismatch or noise), parity error
+(parity bit doesn't match), and overrun (a new byte arrived before the previous
+one was read from the data register).
+
+\question{Q1.8}{Why do RS422/RS485 cables use twisted pairs?}
+Twisting makes both wires pick up virtually identical interference, so the
+noise appears as common-mode and cancels at the differential receiver. It also
+reduces the loop area that radiates/receives EMI.
+
+\question{Q1.9}{What is flow control and name the two common kinds?}
+A mechanism to stop the sender overrunning the receiver. Hardware flow control
+uses RTS/CTS lines; software flow control uses XON/XOFF characters in the data
+stream. Without it, a slow receiver drops bytes (overrun).
+
+\question{Q1.10}{Why is RS232 limited to short distances?}
+Single-ended signalling references ground, so ground shifts and noise add
+directly to the signal, and its higher-voltage swing has limited slew at
+distance --- practically a few metres at moderate baud, versus over a kilometre
+for differential RS422/485.
+
+\tierbanner{Tier 2 --- Core technical (panel round)}%
+{A short paragraph. Mechanisms, arithmetic, and the bring-up reality.}
+
+\question{Q2.1}{Work the baud divider: 16\,MHz clock, 115200 baud, 16$\times$
+oversampling --- what register value and what's the real baud and error?}
+\code{BRR}$=f_{\text{ck}}/\text{baud}=16{,}000{,}000/115200=138.9$, rounded to
+\textbf{139}. The actual baud is $16{,}000{,}000/139 = 115{,}107$, an error of
+about $-807$\,ppm ($-0.08\%$). That's tiny --- well under the ~2\% budget --- so
+8N1 works fine. The lesson: pick a clock that divides your baud cleanly (e.g.\
+a 14.7456\,MHz crystal hits standard bauds exactly), and always check the error
+at high baud where the divisor is small and rounding hurts most.
+
+\question{Q2.2}{How much baud mismatch can a UART tolerate, and why?}
+The receiver samples each bit near its centre, so the accumulated timing error
+at the \emph{last} sampled bit must stay within about half a bit. With a start
+bit plus 8 data plus stop ($\approx$10 bit-times) and centre sampling, the
+combined error of both ends should stay under roughly $\pm$2--3\%. Beyond that
+the sample point walks off the bit and you get framing/parity errors. Two ends
+each at 1.5\% in opposite directions is already marginal --- another reason to
+crystal-clock both sides.
+
+\question{Q2.3}{Walk through computing and checking even parity in firmware.}
+Parity is the XOR-reduction of the data bits: fold the byte
+(\code{b\^{}=b>>4; b\^{}=b>>2; b\^{}=b>>1; p=b\&1}), giving 1 when the number of
+set bits is odd --- which \emph{is} the even-parity bit (it makes the total
+even). Odd parity is the complement. On receive you recompute and compare to
+the received parity bit; a mismatch flags a parity error. It's $O(1)$ and
+branch-free, but remember it only catches odd numbers of bit-flips.
+
+\question{Q2.4}{What is a framing error and what usually causes it?}
+The UART expects the stop bit to be high; if it samples low there, it raises a
+framing error. Causes: baud-rate mismatch (the sample point drifted so the
+``stop'' lands on a data bit), line noise/glitches, a break condition (line
+held low), or wrong frame format (expecting 1 stop bit when 2 were sent).
+On bring-up a steady stream of framing errors almost always means the baud or
+clock config is wrong, not the cable.
+
+\question{Q2.5}{What is an overrun error and how do you prevent it?}
+Overrun happens when a newly received byte overwrites one the CPU hadn't read
+from the data register yet --- data is lost. Prevention: service RX promptly
+via interrupt (push to a ring buffer, Chapter 4), or use DMA to move bytes
+without per-byte CPU work, and apply flow control so a busy receiver can pause
+the sender. At high baud on a slow core, interrupt-per-byte latency is the
+usual culprit --- DMA is the fix.
+
+\question{Q2.6}{Hardware (RTS/CTS) vs software (XON/XOFF) flow control ---
+trade-offs?}
+RTS/CTS uses dedicated lines: the receiver de-asserts RTS/CTS to tell the
+sender ``pause,'' so it's fast, in-band-data-clean, and reacts within a byte ---
+but needs extra wires. XON/XOFF embeds two control bytes in the data stream:
+no extra wires, but it steals two byte values from the data (bad for binary/
+telemetry), and reaction is delayed by buffering. For binary avionics
+telemetry you use hardware flow control or a higher-layer protocol, never
+XON/XOFF.
+
+\question{Q2.7}{Why does RS485 need the driver-enable (DE) managed, and what's
+the timing risk?}
+RS485 is half-duplex: many drivers share one pair, so each must tri-state
+(release the bus) except while transmitting, controlled by the transceiver's DE
+pin. The risk is \emph{turnaround}: you must assert DE before the first bit and
+hold it until the last stop bit has fully shifted out (plus a guard time)
+before releasing --- drop DE early and you truncate the last byte; release late
+and you collide with the next talker. The guard time is a few bit-periods,
+computed from the baud (Coding Gym).
+
+\question{Q2.8}{How does 9-bit / multidrop addressing work on RS485?}
+A 9th data bit marks a byte as an \emph{address} rather than \emph{data}:
+the master sends an address byte with the 9th bit set; all slaves' UARTs (in
+mute/address-match mode) wake and compare it, and only the addressed slave
+listens to the following data bytes (9th bit clear). It lets many nodes share
+one bus without every node interrupting on every byte --- hardware
+``mute until my address'' support makes it efficient.
+
+\question{Q2.9}{Why do differential lines need termination, and where?}
+A fast edge travelling down a transmission line reflects off an unmatched end,
+and the reflection corrupts the signal. Terminating each end of the pair with a
+resistor equal to the cable's characteristic impedance (typically 120\,$\Omega$
+for twisted pair) absorbs the energy and kills reflections. RS422 terminates at
+the receiver end of each pair; RS485 terminates at \emph{both} physical ends of
+the bus (not at stubs in the middle). Missing or wrong termination shows up as
+ringing on the scope and intermittent errors at high baud or long cable.
+
+\question{Q2.10}{Why do flight computers favour RS422 over RS232 for inter-card
+links?}
+Differential signalling gives strong common-mode noise rejection (vital in the
+electrically harsh, EMI-heavy environment of an aircraft --- MIL-STD-461),
+long reliable range, higher usable baud, and full-duplex separation of command
+and telemetry on independent pairs. RS232's single-ended, ground-referenced,
+short-range nature is fine for a debug console but not for a flight-critical
+data link. This is exactly why the DFCC card-to-card interface on the resume is
+RS422.
+
+\tierbanner{Tier 3 --- Trap \& depth (principal-engineer level)}%
+{A paragraph plus the trap. The defensible answers behind ``RS422 daily work.''}
+
+\question{Q3.1}{RS422 and RS485 use the same differential transceivers and
+voltages --- so what \emph{actually} distinguishes them, and when does it bite?}
+Electrically they're nearly identical (differential pairs, $\sim\pm$2--6\,V);
+the real differences are \emph{topology and duplex}. RS422 is one driver per
+pair (point-to-point or one-to-many \emph{receivers}), usually full-duplex with
+separate TX/RX pairs, so the driver is always enabled and there's no bus
+contention. RS485 is multi-\emph{driver} on a shared pair, half-duplex, so it
+\emph{requires} driver-enable arbitration, turnaround timing, and bus
+termination at both ends. \trap the trap is treating them as interchangeable
+because the transceiver datasheet looks similar: wire an RS485 multidrop like an
+RS422 point-to-point (drivers always enabled) and two nodes transmitting at
+once short the bus. The distinguishing design work is the \emph{protocol around
+the driver enable}, not the volts.
+
+\question{Q3.2}{Your RS422 link is solid at 1\,m on the bench but throws
+framing errors at 50\,m in the rig. Walk the diagnosis.}
+Distance changes three things: signal integrity (reflections from missing/
+incorrect termination, now significant at 50\,m), accumulated baud/clock skew
+(less likely if it worked at all, but check both ends' crystals), and noise
+pickup/ground shift (less for differential, but a floating or hugely shifted
+common-mode can exceed the receiver's range). Method: scope the differential
+pair \emph{at the receiver} --- ringing/overshoot says termination
+(add/correct 120\,$\Omega$); a clean but late/early sample says baud; a
+collapsed differential says a broken pair or common-mode out of range (check the
+ground/shield and the receiver's common-mode limits). \trap the junior reflex is
+``lower the baud'' --- which can mask a termination fault rather than fix it.
+The senior method localises it on the scope at the receiver and fixes the
+actual cause; it's the oscilloscope-based root-cause work on the resume.
+
+\question{Q3.3}{Parity ``passed'' but the data is still wrong. How is that
+possible, and what do real protocols use instead?}
+Parity only detects an \emph{odd} number of bit flips in a single character ---
+two flips (or any even number) pass silently, and it gives no protection across
+a multi-byte message or against dropped/duplicated bytes. So a frame can pass
+every byte's parity yet be corrupt at the message level. Real protocols add a
+\textbf{checksum or CRC} over the whole frame (a CRC catches all single/double-
+bit and most burst errors), plus length and sequence fields. \trap candidates
+over-trust parity; the depth is knowing its exact guarantee (odd-error,
+per-character) and that telemetry/CCDL/1553B-style links use a frame CRC ---
+which is why the resume's packet parsing validates a frame checksum, not just
+UART parity.
+
+\question{Q3.4}{Two devices ``don't talk'' over RS232/RS422 even though both
+are configured for 115200 8N1. Enumerate the likely physical-layer faults.}
+For RS232: TX/RX not crossed (both expecting the other to be the DCE/DTE ---
+need a null-modem swap), common ground missing, or inverted polarity. For
+RS422/485: the differential pair A/B swapped (inverts the data $\rightarrow$
+constant framing errors), TX pair of one wired to TX of the other instead of to
+RX, missing termination, or (485) both ends stuck driving. Plus the shared
+suspects: baud/format actually mismatched despite the label, flow-control lines
+not satisfied (CTS held off so nothing sends), and one side's driver not
+enabled. \trap the most common and most overlooked is \emph{A/B (or TX/RX)
+swapped} --- it looks like total silence or all-framing-errors, and the
+disciplined check is a scope/meter on the pair plus confirming the
+crossover, before touching software.
+
+\question{Q3.5}{Design an RS422 telemetry receiver that won't lose data and can
+recover from a mid-frame glitch. What are the building blocks?}
+Layered: (1) hardware --- correct termination and a crystal clock so framing is
+reliable; (2) UART RX via DMA into a circular buffer (Chapter 4) so no byte is
+lost even at high rate, with the IDLE-line interrupt marking frame boundaries;
+(3) a framing protocol with a sync/start pattern, a length field, and a
+\textbf{CRC} so a corrupted or mis-aligned frame is detected and discarded;
+(4) a resynchronisation rule --- on CRC failure, scan forward for the next sync
+pattern rather than trusting byte alignment. \trap the trap is assuming clean
+byte framing implies clean \emph{message} framing; noise can insert/drop a byte
+and shift every subsequent field. The robust receiver never trusts alignment ---
+it re-finds the sync word and validates the CRC every frame, exactly the
+discipline behind the resume's RS422/telemetry packet validation.
+
+%=====================================================================
+\section{Coding Gym}
+%=====================================================================
+
+\begin{partnote}
+All ten problems are host-compilable and verified under
+\code{gcc -Wall -Wextra -std=c11}. They are the arithmetic and bit-level
+operations you actually perform when bringing up and validating a UART/RS422
+link.
+\end{partnote}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{UART baud divider and error}
+
+\textbf{Problem.} For a peripheral clock and target baud (16$\times$
+oversampling), compute the \code{BRR} register, the actual baud, and the error
+in ppm.
+
+\textbf{Hints.}
+\begin{itemize}
+\item \code{BRR = round(f\_ck / baud)}; actual baud \code{= f\_ck / BRR}.
+\item Error in ppm \code{= (actual - baud) * 1e6 / baud} (use 64-bit).
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint32_t baud_brr(uint32_t fck, uint32_t baud) {
+    return (fck + baud / 2u) / baud;          /* rounded divisor */
+}
+static uint32_t baud_actual(uint32_t fck, uint32_t brr) {
+    return fck / brr;
+}
+static int32_t baud_err_ppm(uint32_t actual, uint32_t baud) {
+    return (int32_t)(((int64_t)actual - (int64_t)baud) * 1000000 / baud);
+}
+
+int main(void) {
+    uint32_t brr = baud_brr(16000000u, 115200u);     /* 139 */
+    uint32_t act = baud_actual(16000000u, brr);       /* 115107 */
+    printf("brr=%u actual=%u err=%dppm\n", brr, act, baud_err_ppm(act, 115200u));
+    /* brr=139 actual=115107 err=-807ppm */
+    return 0;
+}
+\end{cgym}
+
+$16{,}000{,}000/115200 = 138.9 \rightarrow 139$, giving $115{,}107$ baud, only
+$-807$\,ppm ($-0.08\%$) off --- comfortably within tolerance. The error is worst
+at high baud (small divisor), which is exactly where bring-up bugs appear, so
+this calculation is the first thing you check when a fast link misbehaves.
+
+\followups
+\begin{enumerate}
+\item \emph{``Why does 14.7456\,MHz give zero error?''} $\rightarrow$ It's an
+  integer multiple of common bauds, so the divisor is exact.
+\item \emph{``Add the OVER8 (8$\times$) mode.''} $\rightarrow$ The divider and
+  the fractional field change; recompute with the 8$\times$ formula.
+\item \emph{``At what baud does a 1\,MHz clock break 115200?''} $\rightarrow$
+  Divisor 8.68 rounds to 9 $\rightarrow$ 111111 baud, $\sim$3.5\% error: too
+  much.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Frame (byte) transmission time}
+
+\textbf{Problem.} Compute how long one character takes on the wire given baud
+and format.
+
+\textbf{Hints.}
+\begin{itemize}
+\item bits/char = 1 start + data + parity + stop.
+\item time = bits / baud.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint32_t frame_time_ns(uint32_t baud, int databits, int parity, int stopbits) {
+    int bits = 1 + databits + (parity ? 1 : 0) + stopbits;
+    return (uint32_t)((uint64_t)bits * 1000000000u / baud);
+}
+
+int main(void) {
+    printf("frame=%u ns\n", frame_time_ns(115200u, 8, 0, 1));   /* 8N1 -> ~86805 ns */
+    return 0;
+}
+\end{cgym}
+
+8N1 is 10 bit-times, so at 115200 baud a byte takes $10/115200 \approx
+86.8\,\mu$s, and the maximum throughput is $115200/10 = 11520$ bytes/s. This is
+the number you use to size buffers and decide between interrupt and DMA: at
+86.8\,$\mu$s/byte an ISR per byte is fine; at 1\,Mbaud (10\,$\mu$s/byte) it
+isn't.
+
+\followups
+\begin{enumerate}
+\item \emph{``Throughput in bytes/s for 8E2?''} $\rightarrow$ 11 bits/byte
+  $\rightarrow$ baud/11.
+\item \emph{``How long to send a 256-byte frame?''} $\rightarrow$
+  256 $\times$ frame\_time; the basis of a transmit-timeout.
+\item \emph{``Why is the IDLE detection time one frame?''} $\rightarrow$ A gap
+  longer than a frame time signals end-of-message.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Compute a parity bit}
+
+\textbf{Problem.} Return the even-parity bit of a byte without a loop over all
+8 bits being the only option --- use an XOR fold.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Fold the byte in halves with XOR: \code{b\^{}=b>>4; b\^{}=b>>2;
+  b\^{}=b>>1}.
+\item The low bit is 1 iff the popcount is odd $\rightarrow$ the even-parity
+  bit.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static int parity_even(uint8_t b) {
+    b ^= b >> 4;
+    b ^= b >> 2;
+    b ^= b >> 1;
+    return b & 1;          /* 1 if an odd number of bits were set */
+}
+
+int main(void) {
+    printf("p(0x07)=%d p(0x03)=%d\n", parity_even(0x07), parity_even(0x03));
+    /* 0x07 has 3 ones -> 1 ; 0x03 has 2 ones -> 0 */
+    return 0;
+}
+\end{cgym}
+
+The XOR fold computes parity in $O(\log n)$ and branch-free. The returned bit is
+the \emph{even}-parity bit: appended, it makes the total number of 1s even.
+Odd parity is its complement. Recompute on receive and compare to the received
+parity bit; remember the guarantee is only ``odd number of flips, single
+character.''
+
+\followups
+\begin{enumerate}
+\item \emph{``Odd parity?''} $\rightarrow$ \code{return (b \& 1) \^{} 1;}.
+\item \emph{``Parity of a 32-bit word?''} $\rightarrow$ Extend the fold:
+  \code{x\^{}=x>>16}, then the same steps.
+\item \emph{``Hardware does parity --- why compute it?''} $\rightarrow$ For a
+  9-bit/manual scheme, a software protocol, or to verify the peripheral.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Build a UART frame bit-sequence}
+
+\textbf{Problem.} Produce the on-wire bit sequence (start, data LSB-first,
+optional parity, stop) for a byte --- the basis of a software (bit-banged) UART
+or a test vector generator.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Start = 0, data LSB first, parity if enabled, stop = 1.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+/* pmode: 0=none, 1=even, 2=odd. Returns number of bits written. */
+static int build_frame(uint8_t data, int pmode, uint8_t *bits) {
+    int n = 0, ones = 0;
+    bits[n++] = 0;                                  /* start bit */
+    for (int i = 0; i < 8; i++) {                   /* data, LSB first */
+        int b = (data >> i) & 1;
+        bits[n++] = (uint8_t)b;
+        ones += b;
+    }
+    if (pmode) {
+        int p = (pmode == 1) ? (ones & 1) : ((ones & 1) ^ 1);  /* even / odd */
+        bits[n++] = (uint8_t)p;
+    }
+    bits[n++] = 1;                                  /* stop bit */
+    return n;
+}
+
+int main(void) {
+    uint8_t bits[12];
+    int n = build_frame(0x41, 1, bits);             /* 'A', even parity */
+    printf("nbits=%d start=%d stop=%d\n", n, bits[0], bits[n - 1]);  /* 11 0 1 */
+    return 0;
+}
+\end{cgym}
+
+This is literally what a bit-banged UART shifts out (one bit per timer tick at
+the baud period) and what you feed a protocol-analyser model to validate a real
+UART's output. Note \textbf{LSB-first} --- get the bit order backwards and every
+byte is reversed, a classic ``the data is garbage but framing is fine'' bug.
+
+\followups
+\begin{enumerate}
+\item \emph{``Bit-bang it: how often do you output each bit?''} $\rightarrow$
+  Every baud period (\code{1/baud}) from a timer ISR.
+\item \emph{``Add a second stop bit.''} $\rightarrow$ Append another \code{1};
+  the receiver just sees a longer idle.
+\item \emph{``9-bit data?''} $\rightarrow$ Loop to 9; the 9th bit often carries
+  address/parity (next problem).
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Detect a framing error}
+
+\textbf{Problem.} Given a sampled frame's bits, decide whether framing is valid
+(start low, stop high).
+
+\textbf{Hints.}
+\begin{itemize}
+\item Only the first and last sampled bits define framing validity here.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static int framing_ok(const uint8_t *bits, int n) {
+    return bits[0] == 0 && bits[n - 1] == 1;   /* start must be 0, stop must be 1 */
+}
+
+int main(void) {
+    uint8_t good[] = {0, 1,0,0,0,0,0,1,0, 1};   /* start=0 ... stop=1 */
+    uint8_t bad[]  = {0, 1,0,0,0,0,0,1,0, 0};   /* stop sampled as 0  */
+    printf("good=%d bad=%d\n", framing_ok(good, 10), framing_ok(bad, 10));
+    return 0;
+}
+\end{cgym}
+
+A real UART raises the framing-error flag when it samples the stop position low.
+The dominant cause is baud mismatch (the sample point has drifted onto a data
+bit), so a flood of framing errors on bring-up points at the clock/baud config,
+not the cable. Noise and break conditions are the other causes.
+
+\followups
+\begin{enumerate}
+\item \emph{``How does the UART know where the stop bit is?''} $\rightarrow$ It
+  counts bit-times from the start edge at the configured baud.
+\item \emph{``Distinguish a break from a framing error.''} $\rightarrow$ A
+  break holds the line low for a whole frame (all zeros incl.\ stop).
+\item \emph{``Why recover by hunting the next idle?''} $\rightarrow$ After a
+  framing error, byte alignment is suspect; resync on idle/start.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{RS485 9-bit address-mark frame}
+
+\textbf{Problem.} Build a 9-bit frame that marks a byte as an address (9th bit
+set) and a test that recognises address bytes.
+
+\textbf{Hints.}
+\begin{itemize}
+\item The 9th bit (bit 8) distinguishes address from data.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint16_t make_addr_frame(uint8_t a) { return (uint16_t)(a | 0x100u); }  /* set bit 8 */
+static int      is_address(uint16_t f)      { return (f >> 8) & 1; }
+
+int main(void) {
+    uint16_t af = make_addr_frame(0x12);
+    printf("frame=0x%03X is_addr=%d data_is_addr=%d\n",
+           af, is_address(af), is_address(0x0041));   /* 0x112 1 0 */
+    return 0;
+}
+\end{cgym}
+
+In multidrop RS485 the master sends the slave's address with bit 8 set; slaves
+in address-mute mode wake only on an address byte, compare it, and the matching
+slave then accepts the following data bytes (bit 8 clear). The hardware
+``mute until addressed'' feature means non-addressed nodes aren't interrupted on
+every byte --- essential on a busy shared bus.
+
+\followups
+\begin{enumerate}
+\item \emph{``How does a slave stop listening after its message?''}
+  $\rightarrow$ Re-enter mute on the next address byte or a frame terminator.
+\item \emph{``Collisions on the bus?''} $\rightarrow$ Only the master initiates;
+  slaves answer only when polled --- the protocol prevents contention.
+\item \emph{``9-bit vs parity reuse.''} $\rightarrow$ Some UARTs repurpose the
+  parity-bit slot as the 9th data/address bit.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{RS485 driver-enable guard time}
+
+\textbf{Problem.} Compute how long (ns) to hold the DE line after the last bit
+before releasing the bus, expressed as a number of bit-periods.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Guard time = guard\_bits / baud.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint32_t de_guard_ns(uint32_t baud, int guard_bits) {
+    return (uint32_t)((uint64_t)guard_bits * 1000000000u / baud);
+}
+
+int main(void) {
+    printf("guard=%u ns\n", de_guard_ns(115200u, 2));   /* ~17361 ns for 2 bits */
+    return 0;
+}
+\end{cgym}
+
+You assert DE before the first start bit and hold it for the whole frame plus a
+guard of a bit or two after the final stop bit, so the last byte fully shifts
+out of the transceiver before you tri-state --- release too early and the last
+character is clipped. At 115200 baud a 2-bit guard is $\sim$17.4\,$\mu$s. Many
+UARTs automate this with a hardware DE signal and a programmable
+assertion/de-assertion time, which removes the software-timing race entirely.
+
+\followups
+\begin{enumerate}
+\item \emph{``Why not release DE immediately on TX-complete?''} $\rightarrow$
+  TXE (register empty) $\neq$ TC (shift register empty); wait for TC plus guard.
+\item \emph{``Turnaround budget on a polled bus?''} $\rightarrow$ Master must
+  wait DE-release + cable delay before expecting the slave's reply.
+\item \emph{``Hardware DE control?''} $\rightarrow$ Configure the UART's
+  driver-enable with assertion/deassertion times; no ISR needed.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Majority-vote bit sampling}
+
+\textbf{Problem.} A receiver oversamples each bit and takes three samples near
+the centre; return the de-noised bit by majority vote.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Majority of three = at least two agree.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+static int majority3(int a, int b, int c) {
+    return (a + b + c) >= 2;     /* at least two of three are 1 */
+}
+
+int main(void) {
+    printf("maj(1,0,1)=%d maj(0,0,1)=%d\n", majority3(1, 0, 1), majority3(0, 0, 1));
+    return 0;
+}
+\end{cgym}
+
+Real UART receivers oversample 16$\times$ and sample bits 8, 9, 10 (around the
+centre), taking the majority to reject a single noise glitch on the line ---
+this is why an oversampling UART is more robust than a naive ``sample once at
+the middle'' bit-bang. The same idea hardens a software UART or a noisy GPIO
+input.
+
+\followups
+\begin{enumerate}
+\item \emph{``Why sample at the centre, not the edge?''} $\rightarrow$ The
+  signal is most settled mid-bit; edges are where transitions/ringing live.
+\item \emph{``5-sample majority?''} $\rightarrow$ \code{sum >= 3}; more noise
+  immunity, more compute.
+\item \emph{``How does oversampling set baud tolerance?''} $\rightarrow$ More
+  samples per bit $\rightarrow$ finer sample-point placement $\rightarrow$
+  better drift tolerance.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Frame checksum (LIN-style, with carry)}
+
+\textbf{Problem.} Compute a single-byte checksum over a frame using a
+sum-with-carry then one's-complement (the LIN ``classic'' checksum).
+
+\textbf{Hints.}
+\begin{itemize}
+\item Add each byte; when the sum exceeds 8 bits, fold the carry back in.
+\item Complement the final sum.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint8_t lin_checksum(const uint8_t *d, int n) {
+    uint16_t s = 0;
+    for (int i = 0; i < n; i++) {
+        s = (uint16_t)(s + d[i]);
+        if (s > 0xFFu) s = (uint16_t)((s & 0xFFu) + 1u);   /* fold the carry */
+    }
+    return (uint8_t)(~s);                                  /* one's complement */
+}
+
+int main(void) {
+    uint8_t d[] = {0x55, 0x93, 0xE5};
+    printf("cksum=0x%02X\n", lin_checksum(d, 3));   /* 0x31 */
+    return 0;
+}
+\end{cgym}
+
+A frame checksum catches errors a per-character parity bit misses --- dropped
+bytes, two-bit flips, mis-ordering. This carry-folded sum is cheap and used in
+LIN and many simple telemetry framings; for stronger protection (burst errors)
+you step up to a CRC (Chapter 13). The receiver recomputes over the received
+bytes and compares; a mismatch discards the frame.
+
+\followups
+\begin{enumerate}
+\item \emph{``Why fold the carry instead of dropping it?''} $\rightarrow$ It
+  makes the checksum sensitive to all byte values (a one's-complement sum),
+  catching more errors.
+\item \emph{``Checksum vs CRC --- when each?''} $\rightarrow$ Checksum for cheap
+  low-rate links; CRC for noisy/critical links (catches burst errors).
+\item \emph{``Include the header/length in the sum?''} $\rightarrow$ Yes ---
+  cover every field you want protected, consistently on both ends.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Baud-mismatch tolerance check}
+
+\textbf{Problem.} Given a baud error in ppm and the frame length in bits,
+decide whether the cumulative sampling error stays within half a bit.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Cumulative error $\approx$ err\_ppm $\times$ bits; half a bit is
+  500000\,ppm.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static int baud_match_ok(int32_t err_ppm, int bits_per_frame) {
+    long cum = (long)err_ppm * bits_per_frame;
+    if (cum < 0) cum = -cum;
+    return cum < 500000;          /* < half a bit (500000 ppm) */
+}
+
+int main(void) {
+    printf("ok(-807,10)=%d ok(60000,10)=%d\n",
+           baud_match_ok(-807, 10), baud_match_ok(60000, 10));
+    /* -807ppm*10 = 8070 -> ok ; 60000ppm*10 = 600000 -> fail */
+    return 0;
+}
+\end{cgym}
+
+This formalises ``the sample point must not drift past the bit edge.'' A
+$-807$\,ppm error over a 10-bit frame is 8070\,ppm of cumulative drift ---
+nowhere near the half-bit (500000\,ppm) limit --- so it works. A 6\% (60000\,ppm)
+error fails: by the stop bit you're sampling the wrong bit. Both ends' errors
+add, so budget half the limit to each side.
+
+\followups
+\begin{enumerate}
+\item \emph{``Two stop bits --- does tolerance change?''} $\rightarrow$ Slightly
+  more bits to the last sample, marginally tighter; the start-bit resync is
+  what bounds it per character.
+\item \emph{``Why does each character resync help?''} $\rightarrow$ The start
+  edge re-zeroes the timing every byte, so error doesn't accumulate across
+  bytes.
+\item \emph{``Budget split between two crystals.''} $\rightarrow$ Give each end
+  $<$1\% so the sum stays safe.
+\end{enumerate}
+\end{gymproblem}
+
+%=====================================================================
+\section{Link to Her Resume}
+%=====================================================================
+
+\begin{resumelink}
+\textbf{RS422 daily work:} ``RS422 is my daily interface on the DFCC --- I
+develop and validate the Embedded C routines for card-to-card RS422 links.
+I can explain why it's RS422 and not RS232: differential pairs reject the
+common-mode noise of an EMI-heavy aircraft (MIL-STD-461), run long and fast,
+and separate command and telemetry full-duplex.''
+
+\medskip
+\textbf{Bring-up diagnosis:} ``When a differential link fails at distance I
+scope the pair \emph{at the receiver} --- ringing means termination, a drifted
+sample point means baud/clock, a swapped A/B means inverted data. I fix the
+actual cause rather than just dropping the baud.''
+
+\medskip
+\textbf{Frame integrity:} ``Parity only catches odd single-character errors, so
+the telemetry framing I validate uses a frame checksum/CRC plus a sync word and
+length, and re-finds the sync on any failure rather than trusting byte
+alignment.''
+
+\medskip
+\small Maps to concrete resume lines: RS422 Embedded C interface routines on the
+DFCC at TASL, oscilloscope-based root-cause analysis, and RS422 telemetry packet
+validation. Keep claims to what the resume states; the deep project scripting is
+Chapter 15, from \code{inputs/INTAKE.md} only.
+\end{resumelink}
+
+%=====================================================================
+\section{Self-Test Scorecard}
+%=====================================================================
+
+\begin{scorecard}
+\begin{enumerate}
+\item UART vs RS232/422/485 --- which is the framing and which is the
+  electrical standard?
+\item Describe an 8N1 frame and state how many bit-times it is.
+\item 16\,MHz clock, 115200 baud, 16$\times$ oversample --- give \code{BRR} and
+  the approximate error.
+\item Single-ended vs differential --- which rejects common-mode noise, and
+  why?
+\item RS422 vs RS485 --- the real distinguishing property (not the volts).
+\item What exactly does a parity bit guarantee, and what does it miss?
+\item Name the three classic UART receive errors.
+\item Why must RS485 manage the driver-enable line, and what's the timing risk?
+\item Where and why do you terminate a differential pair?
+\item Why do flight computers use RS422 for inter-card links?
+\end{enumerate}
+\end{scorecard}
+
+\begin{answerkey}
+\begin{enumerate}
+\item UART = the asynchronous framing (peripheral); RS232/422/485 = electrical
+  standards (voltages, single-ended vs differential).
+\item Start (0), 8 data LSB-first, no parity, 1 stop (1) --- 10 bit-times.
+\item \code{BRR}=139, actual 115107 baud, $\approx-0.08\%$ ($-807$\,ppm).
+\item Differential --- noise hits both wires equally (common-mode) and cancels
+  at the difference receiver.
+\item Topology/duplex: RS422 is one driver, usually full-duplex point-to-point;
+  RS485 is multi-driver half-duplex needing DE arbitration.
+\item It detects an odd number of bit flips in a single character; it misses
+  even-count errors and any multi-byte/dropped-byte corruption.
+\item Framing error (stop sampled low), parity error, overrun (unread byte
+  overwritten).
+\item It's half-duplex shared-bus, so each driver must tri-state except when
+  transmitting; the risk is turnaround --- releasing DE too early clips the last
+  byte, too late collides.
+\item At each end of the pair, with the cable's characteristic impedance
+  ($\sim$120\,$\Omega$), to absorb reflections that would otherwise corrupt fast
+  edges.
+\item Differential noise immunity (EMI/MIL-STD-461), long reliable range,
+  higher baud, and full-duplex separation of command/telemetry --- vs RS232's
+  short single-ended reach.
+\end{enumerate}
+\end{answerkey}
+
+\begin{partnote}
+\emph{End of Chapter 5.} Next: \textbf{SPI \& I2C} --- the two short-range
+synchronous buses: clock polarity/phase modes, chip-select and addressing,
+clock stretching and arbitration, and when to choose each.
+\end{partnote}
