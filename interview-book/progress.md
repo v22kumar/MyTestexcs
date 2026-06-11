@@ -34,14 +34,14 @@ matter) on top of chapter content.
 | 10 | ch10_control_pid.tex | Control Systems & PID | 30 | ~10 | [x] full topic scope |
 | 11 | ch11_debugging_lab.tex | Hardware Debugging & Lab Skills | 30 | ~8 | [x] full topic scope |
 | 12 | ch12_vnv_do178.tex | V&V, DO-178B & Test Methodology | 30 | ~9 | [x] full topic scope |
-| 13 | ch13_coding_gym.tex | 60 Embedded C Problems | 60 | — | [ ] |
+| 13 | ch13_coding_gym.tex | 60 Embedded C Problems | 60 | ~13 | [x] all 60 verified |
 | 14 | ch14_python_automation.tex | Python for Test Automation | 25 | — | [ ] |
 | 15 | ch15_project_deepdives.tex | Her Project Deep-Dives | 25 | — | [ ] **BLOCKED — see note** |
 | 16 | ch16_behavioral_company.tex | Behavioral & Company Rounds | 20 | — | [ ] **BLOCKED — see note** |
 | 17 | ch17_mock_interviews.tex | 5 Full Mock Interviews | 20 | — | [ ] |
 
-**Current compiled size:** `build/book.pdf` = **156 pages** (title + TOC +
-Chapters 1–12 = all of Part C), of the ~520 target.
+**Current compiled size:** `build/book.pdf` = **169 pages** (title + TOC +
+Chapters 1–13), of the ~520 target.
 
 ## Session log
 
@@ -234,6 +234,18 @@ to approach budget without filler.
   independence-pair checker, requirements-traceability coverage query).
 - Compiled clean: 156 pp, zero LaTeX warnings.
 - **Part C (Chapters 9-12) complete.**
+
+### Session 14 — Chapter 13 (60 Embedded C Problems) — opens Part D
+- Full PLAN.md scope: (1-15) bit manipulation, (16-30) memory & strings from
+  scratch, (31-45) data structures on embedded, (46-60) applied.
+- **All 60 solutions verified** clean under `gcc -Wall -Wextra -std=c11`,
+  outputs confirmed (popcount, rev8/rev32, memmove overlap, strrev, itoa,
+  strstr, ring buffer, linked-list reverse/middle/cycle, insertion/binary
+  search, hash, min-heap, CRC-8/16, BCD, isqrt, gray code, GPIO/BSRR, bitfield).
+- Rapid-drill format (Problem -> Solution -> note) appropriate to a 60-problem
+  bank; teaching format reserved for Ch 1-12.
+- Compiled clean: 169 pp, zero LaTeX warnings (wrapped 2 long code signatures,
+  reworded 2 long inline-code notes).
 
 ## Open flags / [VERIFY] / [NEEDS INTAKE] items
 - **Chapters 15 & 16 are HARD-BLOCKED.** Per PLAN.md Section 5 and CLAUDE.md,

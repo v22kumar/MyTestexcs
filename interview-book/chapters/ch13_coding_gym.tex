@@ -1,0 +1,816 @@
+% chapters/ch13_coding_gym.tex — Chapter 13: 60 Embedded C Problems
+% Scope (PLAN.md): (1-15) bit manipulation; (16-30) memory & strings from
+% scratch; (31-45) data structures on embedded; (46-60) applied.
+% Budget 60 pp. ALL 60 solutions verified gcc -Wall -Wextra -std=c11 (zero
+% warnings) before inclusion. Rapid-drill format: Problem -> Solution -> note.
+\chapter{The Coding Gym --- 60 Embedded C Problems}
+\label{ch:coding-gym}
+
+\begin{partnote}
+\textbf{Part D.} Sixty graded Embedded C interview problems for the coding
+rounds: \textbf{1--15} bit manipulation, \textbf{16--30} memory \& strings from
+scratch, \textbf{31--45} data structures on embedded, \textbf{46--60} applied.
+\textbf{Every} solution here compiles clean under
+\code{gcc -Wall -Wextra -std=c11} and was run to confirm its output.
+
+\medskip
+\textbf{How to use this chapter (non-negotiable):} for each problem, cover the
+solution and \textsc{attempt it on paper for $\ge$10 minutes} before reading on
+--- reading solutions cold leaves you at 60\%. The teaching chapters (1--12)
+used the full hints/variants format; this is a rapid-drill bank, so each entry
+is \emph{Problem $\rightarrow$ Solution $\rightarrow$ one-line note}. Speak the
+approach aloud as you would to an interviewer.
+\end{partnote}
+
+%=====================================================================
+\section{Problems 1--15: Bit Manipulation}
+%=====================================================================
+\attempt
+
+\begin{gymproblem}{Set / clear / toggle / test a bit}
+Implement the four canonical single-bit register operations.
+\begin{cgym}
+#include <stdint.h>
+static uint32_t set_bit(uint32_t r, int n) { return r |  (1u << n); }
+static uint32_t clr_bit(uint32_t r, int n) { return r & ~(1u << n); }
+static uint32_t tog_bit(uint32_t r, int n) { return r ^  (1u << n); }
+static int      tst_bit(uint32_t r, int n) { return (r >> n) & 1u; }
+\end{cgym}
+\textbf{Note.} The bread-and-butter of every driver; always use \code{1u} (not
+\code{1}) so shifting into bit 31 isn't undefined behaviour.
+\end{gymproblem}
+
+\begin{gymproblem}{Count set bits (population count)}
+Count the 1-bits in a word.
+\begin{cgym}
+static int popcnt(uint32_t v) {
+    int c = 0;
+    while (v) { v &= v - 1; c++; }   /* clears the lowest set bit each pass */
+    return c;
+}
+\end{cgym}
+\textbf{Note.} Kernighan's method loops once per set bit, not 32 times; on ARM
+prefer \code{\_\_builtin\_popcount} which maps to hardware.
+\end{gymproblem}
+
+\begin{gymproblem}{Swap the nibbles of a byte}
+Exchange the high and low 4 bits.
+\begin{cgym}
+static uint8_t swap_nib(uint8_t b) { return (uint8_t)((b << 4) | (b >> 4)); }
+\end{cgym}
+\textbf{Note.} The cast tames the integer-promotion of the shift back to 8 bits
+(\code{swap\_nib(0x4C)==0xC4}).
+\end{gymproblem}
+
+\begin{gymproblem}{Reverse the bits of a byte}
+Mirror bit 0$\leftrightarrow$7, etc.
+\begin{cgym}
+static uint8_t rev8(uint8_t b) {
+    b = (uint8_t)((b >> 4) | (b << 4));
+    b = (uint8_t)(((b & 0xCC) >> 2) | ((b & 0x33) << 2));
+    b = (uint8_t)(((b & 0xAA) >> 1) | ((b & 0x55) << 1));
+    return b;
+}
+\end{cgym}
+\textbf{Note.} Branch-free swap of nibbles, then pairs, then adjacent bits
+(\code{rev8(0x01)==0x80}); used in CRC and LSB-first formats.
+\end{gymproblem}
+
+\begin{gymproblem}{Reverse the bits of a 32-bit word}
+\begin{cgym}
+static uint32_t rev32(uint32_t v) {
+    uint32_t r = 0;
+    for (int i = 0; i < 32; i++) { r = (r << 1) | (v & 1u); v >>= 1; }
+    return r;
+}
+\end{cgym}
+\textbf{Note.} The simple loop is fine; the mask-swap pattern of \#4 generalises
+to an $O(\log n)$ version if asked.
+\end{gymproblem}
+
+\begin{gymproblem}{Power-of-two test}
+\begin{cgym}
+static int is_pow2(uint32_t v) { return v && !(v & (v - 1)); }
+\end{cgym}
+\textbf{Note.} \code{v\&(v-1)} clears the lowest set bit; zero result with
+\code{v!=0} means exactly one bit was set.
+\end{gymproblem}
+
+\begin{gymproblem}{Round up to the next power of two}
+\begin{cgym}
+static uint32_t next_pow2(uint32_t v) {
+    v--; v |= v>>1; v |= v>>2; v |= v>>4; v |= v>>8; v |= v>>16;
+    return v + 1;
+}
+\end{cgym}
+\textbf{Note.} Bit-smear fills all bits below the top one, then \code{+1}
+carries to the next power (\code{next\_pow2(33)==64}); used to size ring
+buffers/DMA regions.
+\end{gymproblem}
+
+\begin{gymproblem}{Isolate the lowest set bit}
+\begin{cgym}
+static uint32_t lowest_set(uint32_t v) { return v & (uint32_t)(-(int32_t)v); }
+\end{cgym}
+\textbf{Note.} \code{v \& -v} keeps only the least-significant 1 bit
+(\code{lowest\_set(0xC)==0x4}).
+\end{gymproblem}
+
+\begin{gymproblem}{Index of the highest set bit (integer log2)}
+\begin{cgym}
+static int highest_bit(uint32_t v) { int i = -1; while (v) { v >>= 1; i++; } return i; }
+\end{cgym}
+\textbf{Note.} Returns $-1$ for 0; on ARM, \code{31 - \_\_builtin\_clz(v)} is the
+single-instruction form.
+\end{gymproblem}
+
+\begin{gymproblem}{Swap two integers without a temporary}
+\begin{cgym}
+static void xor_swap(int *a, int *b) { if (a != b) { *a ^= *b; *b ^= *a; *a ^= *b; } }
+\end{cgym}
+\textbf{Note.} The \code{a!=b} guard is essential --- XOR-swapping a location with
+itself zeroes it. (A temp is clearer and just as fast; know the trick, prefer
+the temp.)
+\end{gymproblem}
+
+\begin{gymproblem}{Endian byte-swap (32-bit)}
+\begin{cgym}
+static uint32_t bswap32(uint32_t v) {
+    return ((v & 0xFFu) << 24) | ((v & 0xFF00u) << 8) |
+           ((v & 0xFF0000u) >> 8) | ((v & 0xFF000000u) >> 24);
+}
+\end{cgym}
+\textbf{Note.} Converts between host and network/avionics byte order at the wire
+boundary (Chapter 5/8); \code{0x11223344} $\rightarrow$ \code{0x44332211}.
+\end{gymproblem}
+
+\begin{gymproblem}{Count trailing zeros}
+\begin{cgym}
+static int ctz(uint32_t v) { if (!v) return 32; int n = 0; while (!(v & 1u)) { v >>= 1; n++; } return n; }
+\end{cgym}
+\textbf{Note.} The position of the lowest set bit; pairs with \#8 for fast
+priority encoding.
+\end{gymproblem}
+
+\begin{gymproblem}{Build the four bit macros (function form)}
+Wrap \#1 as side-effect-safe inline helpers for register fields.
+\begin{cgym}
+#define BIT(n) (1u << (n))
+static inline uint32_t field_set(uint32_t r, unsigned pos,
+                                 unsigned w, uint32_t val) {
+    uint32_t mask = ((1u << w) - 1u) << pos;
+    return (r & ~mask) | ((val << pos) & mask);
+}
+\end{cgym}
+\textbf{Note.} An inline function evaluates its arguments once (a macro doesn't),
+the safe default for register access (Chapter 1).
+\end{gymproblem}
+
+\begin{gymproblem}{Check if two integers have opposite signs}
+\begin{cgym}
+static int opposite_signs(int a, int b) { return (a ^ b) < 0; }
+\end{cgym}
+\textbf{Note.} XOR sets the sign bit only when the signs differ --- branch-free,
+no overflow risk that subtraction would have.
+\end{gymproblem}
+
+\begin{gymproblem}{Conditionally set or clear bits without branching}
+\begin{cgym}
+static uint32_t set_or_clear(uint32_t word, uint32_t mask, int set) {
+    return (word & ~mask) | (mask & (uint32_t)(-set));   /* set: 0 or 1 */
+}
+\end{cgym}
+\textbf{Note.} \code{-set} is all-ones when \code{set==1}, zero otherwise ---
+a branch-free multiplex, handy in tight ISR code.
+\end{gymproblem}
+
+%=====================================================================
+\section{Problems 16--30: Memory \& Strings from Scratch}
+%=====================================================================
+\attempt
+
+\begin{gymproblem}{\code{my\_memcpy}}
+\begin{cgym}
+#include <stddef.h>
+static void *my_memcpy(void *d, const void *s, size_t n) {
+    unsigned char *dd = d; const unsigned char *ss = s;
+    while (n--) *dd++ = *ss++;
+    return d;
+}
+\end{cgym}
+\textbf{Note.} Byte copy through \code{unsigned char*}; undefined for overlapping
+regions --- that's what \code{memmove} (\#17) is for.
+\end{gymproblem}
+
+\begin{gymproblem}{\code{my\_memmove} (overlap-safe)}
+\begin{cgym}
+static void *my_memmove(void *d, const void *s, size_t n) {
+    unsigned char *dd = d; const unsigned char *ss = s;
+    if (dd < ss) { while (n--) *dd++ = *ss++; }          /* copy forward */
+    else { dd += n; ss += n; while (n--) *--dd = *--ss; } /* copy backward */
+    return d;
+}
+\end{cgym}
+\textbf{Note.} Choose direction by pointer order so source isn't clobbered before
+it's read (\code{move arr+1<-arr} shifts cleanly).
+\end{gymproblem}
+
+\begin{gymproblem}{\code{my\_memset}}
+\begin{cgym}
+static void *my_memset(void *d, int c, size_t n) {
+    unsigned char *dd = d;
+    while (n--) *dd++ = (unsigned char)c;
+    return d;
+}
+\end{cgym}
+\textbf{Note.} The fill value is taken as a byte; this is the \code{.bss}-zeroing
+primitive from Chapter 2's startup model.
+\end{gymproblem}
+
+\begin{gymproblem}{\code{my\_strlen}}
+\begin{cgym}
+static size_t my_strlen(const char *s) {
+    const char *p = s;
+    while (*p) p++;
+    return (size_t)(p - s);
+}
+\end{cgym}
+\textbf{Note.} Pointer subtraction gives the count directly; runs off the end if
+the buffer isn't NUL-terminated.
+\end{gymproblem}
+
+\begin{gymproblem}{\code{my\_strcpy}}
+\begin{cgym}
+static char *my_strcpy(char *d, const char *s) {
+    char *r = d;
+    while ((*d++ = *s++)) ;   /* copies through and including the NUL */
+    return r;
+}
+\end{cgym}
+\textbf{Note.} The assignment-in-condition copies the terminator too; no bounds
+check --- prefer a bounded copy (Chapter 2 \#10) in real code.
+\end{gymproblem}
+
+\begin{gymproblem}{\code{my\_strcmp}}
+\begin{cgym}
+static int my_strcmp(const char *a, const char *b) {
+    while (*a && *a == *b) { a++; b++; }
+    return (int)(unsigned char)*a - (int)(unsigned char)*b;
+}
+\end{cgym}
+\textbf{Note.} \code{unsigned char} casts keep high-byte ordering correct;
+returns sign, not necessarily $\pm1$.
+\end{gymproblem}
+
+\begin{gymproblem}{Reverse a string in place}
+\begin{cgym}
+static void my_strrev(char *s) {
+    size_t i = 0, j = my_strlen(s);
+    if (j == 0) return;
+    j--;
+    while (i < j) { char t = s[i]; s[i] = s[j]; s[j] = t; i++; j--; }
+}
+\end{cgym}
+\textbf{Note.} The \code{j==0} guard prevents unsigned underflow on the empty
+string (\code{"abcd"->"dcba"}).
+\end{gymproblem}
+
+\begin{gymproblem}{\code{my\_atoi}}
+\begin{cgym}
+static int my_atoi(const char *s) {
+    long v = 0; int sg = 1;
+    while (*s == ' ') s++;
+    if (*s == '+' || *s == '-') { if (*s == '-') sg = -1; s++; }
+    while (*s >= '0' && *s <= '9') { v = v * 10 + (*s - '0'); s++; }
+    return (int)(sg * v);
+}
+\end{cgym}
+\textbf{Note.} No overflow guard (like the real \code{atoi}); name \code{strtol}
+as the overflow-safe replacement.
+\end{gymproblem}
+
+\begin{gymproblem}{\code{my\_itoa}}
+\begin{cgym}
+static void my_itoa(int v, char *out) {
+    char tmp[16]; int i = 0, neg = 0; unsigned u;
+    if (v < 0) { neg = 1; u = (unsigned)(-(long)v); } else u = (unsigned)v;
+    if (u == 0) tmp[i++] = '0';
+    while (u) { tmp[i++] = (char)('0' + u % 10); u /= 10; }
+    int o = 0; if (neg) out[o++] = '-';
+    while (i) out[o++] = tmp[--i];
+    out[o] = '\0';
+}
+\end{cgym}
+\textbf{Note.} Build digits reversed then flip; the \code{-(long)v} avoids
+\code{INT\_MIN} negation overflow.
+\end{gymproblem}
+
+\begin{gymproblem}{\code{my\_strchr}}
+\begin{cgym}
+static char *my_strchr(const char *s, int c) {
+    while (*s) { if (*s == (char)c) return (char *)s; s++; }
+    return (c == 0) ? (char *)s : NULL;
+}
+\end{cgym}
+\textbf{Note.} Searching for \code{'\textbackslash0'} returns the terminator
+position (standard behaviour).
+\end{gymproblem}
+
+\begin{gymproblem}{\code{my\_strcat}}
+\begin{cgym}
+static char *my_strcat(char *d, const char *s) {
+    char *r = d;
+    while (*d) d++;                 /* find the end */
+    while ((*d++ = *s++)) ;         /* append + terminate */
+    return r;
+}
+\end{cgym}
+\textbf{Note.} Caller must guarantee \code{d} has room; unbounded \code{strcat}
+is a classic overflow source.
+\end{gymproblem}
+
+\begin{gymproblem}{Palindrome check}
+\begin{cgym}
+static int is_palindrome(const char *s) {
+    size_t i = 0, j = my_strlen(s);
+    if (j == 0) return 1;
+    j--;
+    while (i < j) { if (s[i] != s[j]) return 0; i++; j--; }
+    return 1;
+}
+\end{cgym}
+\textbf{Note.} Two-pointer inward walk; same structure as the in-place reverse.
+\end{gymproblem}
+
+\begin{gymproblem}{Count words in a string}
+\begin{cgym}
+static int count_words(const char *s) {
+    int c = 0, in = 0;
+    while (*s) { if (*s == ' ') in = 0; else if (!in) { in = 1; c++; } s++; }
+    return c;
+}
+\end{cgym}
+\textbf{Note.} A 2-state machine (in/out of a word); counts on each out$\to$in
+transition.
+\end{gymproblem}
+
+\begin{gymproblem}{\code{my\_strstr} (substring search)}
+\begin{cgym}
+static const char *my_strstr(const char *h, const char *n) {
+    if (!*n) return h;
+    for (; *h; h++) {
+        const char *a = h, *b = n;
+        while (*a && *b && *a == *b) { a++; b++; }
+        if (!*b) return h;
+    }
+    return NULL;
+}
+\end{cgym}
+\textbf{Note.} Naive $O(nm)$ search --- fine for short needles; mention KMP if
+asked for $O(n+m)$.
+\end{gymproblem}
+
+\begin{gymproblem}{Align a size up to a boundary}
+\begin{cgym}
+static size_t align_up(size_t x, size_t a) { return (x + (a - 1)) & ~(a - 1); }
+\end{cgym}
+\textbf{Note.} Power-of-two \code{a} only; \code{align\_up(13,8)==16} --- the
+allocator/DMA alignment primitive (Chapter 2).
+\end{gymproblem}
+
+%=====================================================================
+\section{Problems 31--45: Data Structures on Embedded}
+%=====================================================================
+\attempt
+
+\begin{gymproblem}{Lock-free SPSC ring buffer}
+\begin{cgym}
+#include <stdbool.h>
+#define RBN 8
+typedef struct { uint8_t b[RBN]; volatile uint32_t h, t; } ring_t;
+static bool rb_push(ring_t *r, uint8_t v) {
+    uint32_t n = (r->h + 1) & (RBN - 1);
+    if (n == r->t) return false;
+    r->b[r->h] = v; r->h = n; return true;
+}
+static bool rb_pop(ring_t *r, uint8_t *v) {
+    if (r->h == r->t) return false;
+    *v = r->b[r->t]; r->t = (r->t + 1) & (RBN - 1); return true;
+}
+\end{cgym}
+\textbf{Note.} The \#1 embedded coding question --- single writer per index, no
+lock (Chapter 4).
+\end{gymproblem}
+
+\begin{gymproblem}{Array stack}
+\begin{cgym}
+typedef struct { int d[16]; int sp; } stk_t;
+static bool st_push(stk_t *s, int v) { if (s->sp >= 16) return false; s->d[s->sp++] = v; return true; }
+static bool st_pop(stk_t *s, int *v) { if (s->sp <= 0) return false; *v = s->d[--s->sp]; return true; }
+\end{cgym}
+\textbf{Note.} Bounds-checked LIFO; the basis of \#42 (parenthesis matching).
+\end{gymproblem}
+
+\begin{gymproblem}{Circular queue}
+\begin{cgym}
+typedef struct { int d[8]; int head, tail, cnt; } q_t;
+static bool q_put(q_t *q, int v) { if (q->cnt == 8) return false; q->d[q->tail] = v; q->tail = (q->tail+1)%8; q->cnt++; return true; }
+static bool q_get(q_t *q, int *v) { if (q->cnt == 0) return false; *v = q->d[q->head]; q->head = (q->head+1)%8; q->cnt--; return true; }
+\end{cgym}
+\textbf{Note.} A \code{cnt} field disambiguates full/empty (vs the ring buffer's
+one-slot-empty trick).
+\end{gymproblem}
+
+\begin{gymproblem}{Singly linked list push}
+\begin{cgym}
+typedef struct node { int v; struct node *next; } node_t;
+static node_t *ll_push(node_t *head, node_t *n, int v) { n->v = v; n->next = head; return n; }
+\end{cgym}
+\textbf{Note.} Caller owns the node storage (no \code{malloc}) --- the embedded
+intrusive-list style.
+\end{gymproblem}
+
+\begin{gymproblem}{Reverse a linked list}
+\begin{cgym}
+static node_t *ll_reverse(node_t *h) {
+    node_t *p = NULL;
+    while (h) { node_t *nx = h->next; h->next = p; p = h; h = nx; }
+    return p;
+}
+\end{cgym}
+\textbf{Note.} Three-pointer iterative reverse, $O(n)$ time, $O(1)$ space ---
+a perennial interview favourite.
+\end{gymproblem}
+
+\begin{gymproblem}{Find the middle node}
+\begin{cgym}
+static node_t *ll_middle(node_t *h) {
+    node_t *s = h, *f = h;
+    while (f && f->next) { s = s->next; f = f->next->next; }
+    return s;
+}
+\end{cgym}
+\textbf{Note.} Slow/fast pointers --- fast moves twice, so slow lands at the
+middle in one pass.
+\end{gymproblem}
+
+\begin{gymproblem}{Detect a cycle (Floyd)}
+\begin{cgym}
+static int ll_has_cycle(node_t *h) {
+    node_t *s = h, *f = h;
+    while (f && f->next) { s = s->next; f = f->next->next; if (s == f) return 1; }
+    return 0;
+}
+\end{cgym}
+\textbf{Note.} Tortoise/hare meet iff there's a loop; same trick used for
+deadlock detection (Chapter 9).
+\end{gymproblem}
+
+\begin{gymproblem}{Insertion sort}
+\begin{cgym}
+static void isort(int *a, int n) {
+    for (int i = 1; i < n; i++) {
+        int k = a[i], j = i - 1;
+        while (j >= 0 && a[j] > k) { a[j+1] = a[j]; j--; }
+        a[j+1] = k;
+    }
+}
+\end{cgym}
+\textbf{Note.} $O(n^2)$ but in-place, stable, and fast for small/nearly-sorted
+arrays --- common on memory-tight targets.
+\end{gymproblem}
+
+\begin{gymproblem}{Binary search}
+\begin{cgym}
+static int bsearch_i(const int *a, int n, int key) {
+    int lo = 0, hi = n - 1;
+    while (lo <= hi) {
+        int m = lo + (hi - lo) / 2;     /* avoids lo+hi overflow */
+        if (a[m] == key) return m;
+        if (a[m] < key) lo = m + 1; else hi = m - 1;
+    }
+    return -1;
+}
+\end{cgym}
+\textbf{Note.} \code{lo+(hi-lo)/2} not \code{(lo+hi)/2} --- the famous overflow
+bug; requires a sorted array.
+\end{gymproblem}
+
+\begin{gymproblem}{Tiny open-addressing hash map}
+\begin{cgym}
+#define HN 16
+typedef struct { int key, val, used; } slot_t;
+static void hput(slot_t *h, int key, int val) {
+    int i = ((unsigned)key * 2654435761u) % HN;
+    while (h[i].used && h[i].key != key) i = (i + 1) % HN;   /* linear probe */
+    h[i].key = key; h[i].val = val; h[i].used = 1;
+}
+static int hget(slot_t *h, int key, int *val) {
+    int i = ((unsigned)key * 2654435761u) % HN, c = 0;
+    while (h[i].used && c < HN) { if (h[i].key == key) { *val = h[i].val; return 1; } i = (i+1)%HN; c++; }
+    return 0;
+}
+\end{cgym}
+\textbf{Note.} Fixed-size, no allocation; Knuth multiplicative hash + linear
+probing --- a config/lookup table on an MCU.
+\end{gymproblem}
+
+\begin{gymproblem}{Min-heap insert / peek}
+\begin{cgym}
+typedef struct { int a[32]; int n; } heap_t;
+static void heap_push(heap_t *h, int v) {
+    int i = h->n++; h->a[i] = v;
+    while (i > 0) { int p = (i-1)/2; if (h->a[p] <= h->a[i]) break;
+        int t = h->a[p]; h->a[p] = h->a[i]; h->a[i] = t; i = p; }
+}
+static int heap_peek(heap_t *h) { return h->a[0]; }
+\end{cgym}
+\textbf{Note.} Array-backed binary heap (parent at \code{(i-1)/2}); the priority
+structure behind schedulers and timer queues.
+\end{gymproblem}
+
+\begin{gymproblem}{Balanced-parentheses check}
+\begin{cgym}
+static int balanced(const char *s) {
+    int d = 0;
+    while (*s) { if (*s == '(') d++; else if (*s == ')') { if (--d < 0) return 0; } s++; }
+    return d == 0;
+}
+\end{cgym}
+\textbf{Note.} A counter suffices for one bracket type; a real stack (\#32) is
+needed for mixed \code{()[]\{\}}.
+\end{gymproblem}
+
+\begin{gymproblem}{Traffic-light state machine}
+\begin{cgym}
+typedef enum { RED, GREEN, YELLOW } light_t;
+static light_t light_next(light_t s) {
+    return s == RED ? GREEN : (s == GREEN ? YELLOW : RED);
+}
+\end{cgym}
+\textbf{Note.} The canonical FSM; in real firmware it's table-driven with
+per-state timers (Chapter 4 software timers).
+\end{gymproblem}
+
+\begin{gymproblem}{Fixed-point Q16.16 multiply}
+\begin{cgym}
+static int32_t fxmul(int32_t a, int32_t b) { return (int32_t)(((int64_t)a * b) >> 16); }
+\end{cgym}
+\textbf{Note.} Promote to 64-bit before shifting back --- fixed-point maths on an
+FPU-less MCU (PID gains, filters).
+\end{gymproblem}
+
+\begin{gymproblem}{Moving-average filter}
+\begin{cgym}
+typedef struct { int buf[4]; int idx; long sum; } mavg_t;
+static int mavg(mavg_t *m, int x) {
+    m->sum -= m->buf[m->idx]; m->buf[m->idx] = x; m->sum += x;
+    m->idx = (m->idx + 1) & 3;
+    return (int)(m->sum / 4);
+}
+\end{cgym}
+\textbf{Note.} $O(1)$ per sample by maintaining a running sum; smooths sensor
+noise before a derivative (Chapter 10).
+\end{gymproblem}
+
+%=====================================================================
+\section{Problems 46--60: Applied}
+%=====================================================================
+\attempt
+
+\begin{gymproblem}{Software debounce by integration}
+\begin{cgym}
+static uint8_t debounce(uint8_t hist, int raw, int *stable) {
+    hist = (uint8_t)((hist << 1) | (raw ? 1 : 0));
+    if (hist == 0xFF) *stable = 1; else if (hist == 0) *stable = 0;
+    return hist;
+}
+\end{cgym}
+\textbf{Note.} Declares a stable level only after 8 equal samples; non-blocking,
+runs on a timer tick (Chapter 4).
+\end{gymproblem}
+
+\begin{gymproblem}{CRC-8 (poly 0x07)}
+\begin{cgym}
+static uint8_t crc8(const uint8_t *d, int n) {
+    uint8_t c = 0;
+    for (int i = 0; i < n; i++) {
+        c ^= d[i];
+        for (int b = 0; b < 8; b++) c = (uint8_t)((c & 0x80) ? (c << 1) ^ 0x07 : (c << 1));
+    }
+    return c;
+}
+\end{cgym}
+\textbf{Note.} Bitwise CRC; for speed, precompute a 256-entry table. Catches
+errors a checksum misses.
+\end{gymproblem}
+
+\begin{gymproblem}{CRC-16-CCITT (poly 0x1021)}
+\begin{cgym}
+static uint16_t crc16(const uint8_t *d, int n) {
+    uint16_t c = 0xFFFF;
+    for (int i = 0; i < n; i++) {
+        c ^= (uint16_t)(d[i] << 8);
+        for (int b = 0; b < 8; b++) c = (uint16_t)((c & 0x8000) ? (c << 1) ^ 0x1021 : (c << 1));
+    }
+    return c;
+}
+\end{cgym}
+\textbf{Note.} The frame-integrity check behind robust telemetry framing
+(Chapters 5/8); init \code{0xFFFF} is the CCITT convention.
+\end{gymproblem}
+
+\begin{gymproblem}{Sum checksum (two's complement)}
+\begin{cgym}
+static uint8_t checksum(const uint8_t *d, int n) {
+    uint8_t s = 0;
+    for (int i = 0; i < n; i++) s = (uint8_t)(s + d[i]);
+    return (uint8_t)(-(int)s);   /* so the bytes + checksum sum to 0 */
+}
+\end{cgym}
+\textbf{Note.} Cheap and weak (misses transpositions); use a CRC when burst
+errors matter.
+\end{gymproblem}
+
+\begin{gymproblem}{Word parity}
+\begin{cgym}
+static int parity(uint32_t v) { int p = 0; while (v) { p ^= 1; v &= v - 1; } return p; }
+\end{cgym}
+\textbf{Note.} 1 if an odd number of bits are set --- ARINC 429 / UART parity
+(Chapters 5/8).
+\end{gymproblem}
+
+\begin{gymproblem}{BCD to binary}
+\begin{cgym}
+static uint8_t bcd2bin(uint8_t b) { return (uint8_t)((b >> 4) * 10 + (b & 0x0F)); }
+\end{cgym}
+\textbf{Note.} Each nibble is a decimal digit; RTC and some sensors report BCD
+(\code{0x42 -> 42}).
+\end{gymproblem}
+
+\begin{gymproblem}{Binary to BCD}
+\begin{cgym}
+static uint8_t bin2bcd(uint8_t b) { return (uint8_t)(((b / 10) << 4) | (b % 10)); }
+\end{cgym}
+\textbf{Note.} The inverse of \#51; needed to write a value back to a BCD RTC
+register.
+\end{gymproblem}
+
+\begin{gymproblem}{Pack / unpack a telemetry frame}
+\begin{cgym}
+static int pack_frame(uint8_t id, uint16_t val, uint8_t *out) {
+    out[0] = id; out[1] = (uint8_t)(val >> 8); out[2] = (uint8_t)(val & 0xFF);   /* big-endian */
+    return 3;
+}
+static void unpack_frame(const uint8_t *in, uint8_t *id, uint16_t *val) {
+    *id = in[0]; *val = (uint16_t)((in[1] << 8) | in[2]);
+}
+\end{cgym}
+\textbf{Note.} Field-by-field with explicit byte order --- never a struct cast
+(Chapters 1/8 endianness/padding traps).
+\end{gymproblem}
+
+\begin{gymproblem}{Integer square root}
+\begin{cgym}
+static uint32_t isqrt(uint32_t x) {
+    uint32_t r = 0, bit = 1u << 30;
+    while (bit > x) bit >>= 2;
+    while (bit) { if (x >= r + bit) { x -= r + bit; r = (r >> 1) + bit; } else r >>= 1; bit >>= 2; }
+    return r;
+}
+\end{cgym}
+\textbf{Note.} Digit-by-digit (binary) sqrt, no FPU, no float
+(\code{isqrt(100)==10}); used in RMS/magnitude maths.
+\end{gymproblem}
+
+\begin{gymproblem}{Linear map / scale (Arduino \code{map})}
+\begin{cgym}
+static int32_t map_val(int32_t x, int32_t in_lo, int32_t in_hi,
+                       int32_t out_lo, int32_t out_hi) {
+    return out_lo +
+        (int32_t)((int64_t)(x - in_lo) * (out_hi - out_lo) / (in_hi - in_lo));
+}
+\end{cgym}
+\textbf{Note.} Rescale an ADC reading to engineering units; 64-bit intermediate
+avoids overflow (50 of 0--100 maps to 500 of 0--1000).
+\end{gymproblem}
+
+\begin{gymproblem}{Clamp / saturate}
+\begin{cgym}
+static int32_t clampi(int32_t x, int32_t lo, int32_t hi) { return x < lo ? lo : (x > hi ? hi : x); }
+\end{cgym}
+\textbf{Note.} Saturate an actuator command to its limits (the output stage of
+the PID, Chapter 10).
+\end{gymproblem}
+
+\begin{gymproblem}{Gray code encode / decode}
+\begin{cgym}
+static uint32_t bin2gray(uint32_t b) { return b ^ (b >> 1); }
+static uint32_t gray2bin(uint32_t g) { uint32_t b = 0; for (; g; g >>= 1) b ^= g; return b; }
+\end{cgym}
+\textbf{Note.} Successive Gray values differ by one bit --- rotary encoders use it
+so a transition never mis-reads (\code{bin2gray(5)==7}).
+\end{gymproblem}
+
+\begin{gymproblem}{Simple cooperative scheduler}
+\begin{cgym}
+typedef struct { uint32_t period, next; } task_t;
+static int task_due(task_t *t, uint32_t now) {
+    if (now >= t->next) { t->next = now + t->period; return 1; }
+    return 0;
+}
+\end{cgym}
+\textbf{Note.} Polled ``run every \code{period}'' from a tick counter; the
+bare-metal superloop alternative to an RTOS (Chapter 9).
+\end{gymproblem}
+
+\begin{gymproblem}{GPIO driver skeleton (register model)}
+\begin{cgym}
+typedef struct { volatile uint32_t MODER, ODR, BSRR; } gpio_t;
+static void gpio_set(gpio_t *g, int pin) { g->BSRR = (1u << pin); }
+static void gpio_clr(gpio_t *g, int pin) { g->BSRR = (1u << (pin + 16)); }
+\end{cgym}
+\textbf{Note.} Atomic set/clear via \code{BSRR} (no read-modify-write race,
+Chapter 3); on target \code{g} points at the peripheral address.
+\end{gymproblem}
+
+\begin{gymproblem}{Bitfield extract / insert}
+\begin{cgym}
+static uint32_t bf_get(uint32_t r, int pos, int w) { return (r >> pos) & ((1u << w) - 1u); }
+static uint32_t bf_set(uint32_t r, int pos, int w, uint32_t v) {
+    uint32_t m = ((1u << w) - 1u) << pos;
+    return (r & ~m) | ((v << pos) & m);
+}
+\end{cgym}
+\textbf{Note.} The portable, endianness-safe alternative to bitfield structs for
+registers and wire formats (Chapter 1) --- the note that closes the gym.
+\end{gymproblem}
+
+%=====================================================================
+\section{Link to Her Resume}
+%=====================================================================
+\begin{resumelink}
+\textbf{Coding-round readiness:} ``On the RS422/Embedded C work I write exactly
+this kind of code --- ring buffers for serial RX, CRC/checksum for frame
+integrity, bitfield extract/insert and byte-order packing for telemetry, and
+fixed-point maths where there's no FPU. I can write and explain any of these on
+a whiteboard.''
+
+\medskip
+\textbf{Why these specific 60:} they're the operations behind the resume ---
+protocol parsing (CRC-16, pack/unpack, parity), driver register access (the bit
+macros, GPIO/\code{BSRR}), and the data structures real firmware uses without
+\code{malloc} (ring buffer, intrusive list, fixed pool/queue).
+
+\medskip
+\small Every solution compiles clean under \code{gcc -Wall -Wextra -std=c11};
+the point of the gym is to reproduce them under interview pressure, on paper,
+then defend the edge cases (overflow, NUL-termination, overlap, atomicity).
+\end{resumelink}
+
+%=====================================================================
+\section{Self-Test Scorecard}
+%=====================================================================
+\begin{scorecard}
+\begin{enumerate}
+\item Write set/clear/toggle/test-bit from memory --- why \code{1u} not
+  \code{1}?
+\item Implement \code{popcount} in better than 32 iterations.
+\item Why is \code{my\_memcpy} undefined on overlapping regions, and what fixes
+  it?
+\item Reverse a linked list iteratively (3 pointers).
+\item Slow/fast pointers solve which two list problems?
+\item Why \code{lo+(hi-lo)/2} in binary search?
+\item Write the SPSC ring buffer and state why it needs no lock.
+\item CRC vs checksum --- when do you need the CRC?
+\item Convert binary$\leftrightarrow$BCD for an RTC register.
+\item Why extract register fields with shifts/masks rather than a bitfield
+  struct?
+\end{enumerate}
+\end{scorecard}
+
+\begin{answerkey}
+\begin{enumerate}
+\item \code{r|=(1u<<n)} / \code{\&=\textasciitilde} / \code{\^{}=} /
+  \code{(r>>n)\&1u}; \code{1u} because \code{1<<31} on signed \code{int} is UB.
+\item Kernighan: \code{while(v)\{v\&=v-1;c++;\}} --- one pass per set bit.
+\item A forward copy can clobber source bytes before reading them; \code{memmove}
+  picks copy direction by pointer order.
+\item \code{p=NULL; while(h)\{nx=h->next; h->next=p; p=h; h=nx;\}}.
+\item Finding the middle node and detecting a cycle (Floyd).
+\item \code{lo+hi} can overflow \code{int}; the difference form can't.
+\item Single writer to \code{head}, single reader to \code{tail} --- neither
+  touches the other's index, so no mutex needed.
+\item CRC catches burst/multi-bit errors a sum misses --- use it on noisy or
+  critical links.
+\item \code{bcd2bin: (b>>4)*10+(b\&0xF)}; \code{bin2bcd: ((b/10)<<4)|(b\%10)}.
+\item Bitfield layout/bit-order is implementation-defined; shifts/masks are
+  portable and endianness-safe for registers and wire formats.
+\end{enumerate}
+\end{answerkey}
+
+\begin{partnote}
+\emph{End of Chapter 13.} Next: \textbf{Python for Test Automation} --- struct
+pack/unpack of binary telemetry, pyserial scripting, log parsing, and the
+questions asked when ``Python automation'' is on a resume.
+\end{partnote}
