@@ -1,0 +1,1055 @@
+% chapters/ch07_can_bus.tex — Chapter 7: CAN Bus Deep Dive
+% Scope (PLAN.md): frame fields, identifiers & arbitration, bit stuffing,
+% error frames & states (active/passive/bus-off), ACK, bit timing & sample
+% point, CAN FD awareness, higher layers (CANopen/J1939), drone servo control
+% over CAN. Budget 45 pp, mix 28 Q&A / 13 code / 4 concept.
+% All snippets verified gcc -Wall -Wextra -std=c11 (zero warnings).
+
+\chapter{CAN Bus Deep Dive}
+\label{ch:can-bus}
+
+\begin{partnote}
+\textbf{Scope} --- frame fields $\rightarrow$ identifiers \& bitwise
+arbitration $\rightarrow$ bit stuffing $\rightarrow$ error frames \& fault
+confinement (error-active / passive / bus-off) $\rightarrow$ the ACK mechanism
+$\rightarrow$ bit timing \& sample point $\rightarrow$ CAN FD awareness
+$\rightarrow$ higher layers (CANopen / J1939) $\rightarrow$ drone-servo control
+over CAN. CAN is the candidate's lab bus (MKS drone CAN servos, CAN across the
+UAV LRUs), so this is one of the strongest selling points --- it must be
+bulletproof.
+\end{partnote}
+
+CAN earns its place in vehicles and aircraft because it is \emph{multi-master},
+\emph{prioritised}, and \emph{robust}: any node can talk, the most urgent
+message always wins the bus without collisions, and a five-layer error scheme
+keeps one faulty node from taking down the bus. Every question below circles
+that design.
+
+%=====================================================================
+\section{Primer}
+%=====================================================================
+
+\subsection{The bus and the bits}
+
+CAN is a two-wire differential bus (\textbf{CAN\_H}, \textbf{CAN\_L}) with a
+crucial asymmetry: a \textbf{dominant} bit (logical 0) wins over a
+\textbf{recessive} bit (logical 1). Any node driving dominant pulls the bus
+dominant --- wired-AND, like I2C but for arbitration. Nodes are not addressed;
+instead each \emph{message} carries an \textbf{identifier} that serves both as
+its priority and as a content label that receivers filter on. The bus is
+terminated 120\,$\Omega$ at both ends (Chapter 5's transmission-line rule).
+
+\subsection{Arbitration without collisions}
+
+Because dominant beats recessive, CAN does collision-free arbitration: every
+node that wants to transmit starts at the same time and sends its identifier
+MSB-first while \emph{monitoring} the bus. A node sending a recessive (1) that
+sees a dominant (0) has lost --- a higher-priority message is using the same bit
+position --- so it backs off and becomes a receiver, \emph{without} any data
+being destroyed. The winner (lowest numeric identifier = most dominant bits
+early) continues seamlessly. This is the heart of CAN: priority is the ID, and
+the lowest ID always wins, deterministically.
+
+\subsection{Frame format, stuffing, CRC, ACK}
+
+A standard data frame is: SOF (1 dominant) $\rightarrow$ 11-bit identifier
+$\rightarrow$ RTR $\rightarrow$ control (IDE, r0, 4-bit DLC) $\rightarrow$
+0--8 data bytes $\rightarrow$ 15-bit CRC + delimiter $\rightarrow$ ACK slot +
+delimiter $\rightarrow$ 7-bit EOF, then the inter-frame space. Extended frames
+use a 29-bit identifier. To keep receivers synchronised, the transmitter applies
+\textbf{bit stuffing}: after five consecutive identical bits it inserts one of
+opposite polarity (receivers remove it), guaranteeing enough edges for
+resynchronisation. The \textbf{CRC} (15-bit) detects corruption; the
+\textbf{ACK slot} is sent recessive by the transmitter and any node that
+received the frame correctly pulls it dominant --- so the transmitter learns
+\emph{at least one} node heard it.
+
+\subsection{Bit timing, fault confinement, CAN FD}
+
+Each bit is divided into \textbf{time quanta}: a sync segment, then phase
+segments, with the \textbf{sample point} (typically ~75--87.5\%) where the bit
+value is read --- placed late so signal propagation around the bus settles
+first. \textbf{Fault confinement}: each node keeps a transmit and receive error
+counter; on errors they climb and on success they fall. Error-\textbf{active}
+(counter $<$128) signals errors actively; error-\textbf{passive}
+($\geq$128) backs off; \textbf{bus-off} ($>$255 TEC) removes the node from the
+bus entirely --- so a babbling node silences \emph{itself}, protecting the bus.
+\textbf{CAN FD} (Flexible Data-rate) extends classic CAN with up to 64-byte
+payloads and a faster data-phase bitrate, while keeping the same arbitration.
+
+%=====================================================================
+\section{Q\&A Bank}
+%=====================================================================
+
+\tierbanner{Tier 1 --- Screening (phone / HR-technical)}%
+{Two to four sentences. CAN fundamentals --- expected cold for any
+automotive/avionics role.}
+
+\question{Q1.1}{What kind of bus is CAN?}
+A multi-master, two-wire differential serial bus with message-based (not
+node-addressed) communication and built-in priority arbitration and error
+handling. Any node may transmit; the message identifier sets priority and is
+what receivers filter on.
+
+\question{Q1.2}{What are dominant and recessive bits?}
+Dominant is logical 0 and ``wins'' --- if any node drives dominant, the bus is
+dominant; recessive is logical 1 and only appears if every node lets the bus
+float recessive. This wired-AND behaviour underlies arbitration and acks.
+
+\question{Q1.3}{How does CAN decide who transmits when two nodes start
+together?}
+By bitwise arbitration on the identifier: each node sends its ID while watching
+the bus, and a node that sends recessive but reads dominant has lost and backs
+off. The lowest numeric ID (most dominant bits) wins, with no collision and no
+data loss.
+
+\question{Q1.4}{Is CAN addressed to nodes?}
+No --- frames carry a message identifier, not a destination node address. Every
+node hears every frame and uses acceptance filters to keep only the IDs it cares
+about.
+
+\question{Q1.5}{What is bit stuffing?}
+After five consecutive bits of the same value, the transmitter inserts one
+opposite bit (which receivers strip out). It guarantees regular edges so
+receivers can stay synchronised on a bus with no separate clock.
+
+\question{Q1.6}{How big is a CAN data payload?}
+Classic CAN carries 0--8 data bytes per frame (DLC 0--8). CAN FD extends this to
+up to 64 bytes.
+
+\question{Q1.7}{What is the ACK slot?}
+A bit the transmitter sends recessive; any node that received the frame without
+error pulls it dominant. So the transmitter knows at least one node received it
+correctly --- though not \emph{which} node.
+
+\question{Q1.8}{Standard vs extended CAN identifier?}
+Standard frames use an 11-bit identifier (2048 IDs); extended frames use 29 bits
+(via the IDE bit), giving far more IDs --- used by higher layers like J1939.
+
+\question{Q1.9}{Why is CAN good for vehicles and aircraft?}
+Differential noise immunity, deterministic priority (the urgent message always
+wins), multi-master flexibility, robust error detection and fault confinement,
+and low wiring (one twisted pair for many nodes). It degrades gracefully ---
+a faulty node removes itself.
+
+\question{Q1.10}{What terminates a CAN bus and why?}
+120\,$\Omega$ resistors at each physical end of the trunk, matching the cable
+impedance to absorb reflections (Chapter 5). Two in parallel present ~60\,$\Omega$
+to drivers; missing termination causes ringing and errors.
+
+\tierbanner{Tier 2 --- Core technical (panel round)}%
+{A short paragraph.}
+
+\question{Q2.1}{Walk a concrete arbitration example.}
+Suppose node A sends ID 0x100 and node B sends 0x200 simultaneously. They agree
+on the early identical bits; at the first differing bit A sends 0 (dominant)
+where B sends 1 (recessive). B reads the bus dominant while transmitting
+recessive, so B loses arbitration and switches to receive; A continues without
+even knowing a contest happened. 0x100 $<$ 0x200, so the lower ID won --- the
+general rule.
+
+\question{Q2.2}{Walk the fields of a standard CAN data frame in order.}
+SOF (1 dominant start bit) $\rightarrow$ 11-bit identifier (MSB first)
+$\rightarrow$ RTR (dominant for data, recessive for remote request)
+$\rightarrow$ IDE (standard/extended) and r0 reserved $\rightarrow$ 4-bit DLC
+(data length) $\rightarrow$ 0--8 data bytes $\rightarrow$ 15-bit CRC + recessive
+delimiter $\rightarrow$ ACK slot + delimiter $\rightarrow$ 7 recessive EOF bits,
+then $\geq$3 bits of inter-frame space. The receiver checks CRC, form, stuffing,
+and acks in the ACK slot.
+
+\question{Q2.3}{Explain CAN bit timing and the sample point.}
+Each bit time is divided into time quanta: a fixed 1-tq sync segment, then
+propagation + phase-segment-1 before the sample point, then phase-segment-2
+after. The \textbf{sample point} is where the node reads the bit value, placed
+late (~75--87.5\%) so the dominant/recessive level has propagated to the
+furthest node and settled before sampling. You set it via the bit-rate
+prescaler and TSEG1/TSEG2; both ends (the whole bus) must agree on bitrate, and
+the sample point affects how much propagation delay and oscillator tolerance the
+bus survives.
+
+\question{Q2.4}{Compute a 500\,kbit/s configuration from a 40\,MHz CAN clock.}
+Pick the prescaler and segments so
+$\text{bitrate} = f_{\text{clk}} / ((\text{BRP}+1)\cdot N_{tq})$ with
+$N_{tq}=1+\text{TSEG1}+\text{TSEG2}$. With BRP+1\,=\,5 and $N_{tq}=16$ (TSEG1=13,
+TSEG2=2): $40\text{M}/(5\times16) = 500$\,kbit/s, and the sample point is
+$(1+13)/16 = 87.5\%$. A late sample point like this is typical for longer buses
+to tolerate propagation delay; you'd lower it if you needed more
+oscillator-tolerance margin instead.
+
+\question{Q2.5}{Explain the three fault-confinement states.}
+Each node has a transmit error counter (TEC) and receive error counter (REC),
+which rise on errors and fall on success. \textbf{Error-active} (counters
+$<$128): normal --- the node signals errors with an active (dominant) error
+flag. \textbf{Error-passive} (counter $\geq$128): the node still works but
+signals errors passively and waits longer between transmits, so a flaky node
+intrudes less. \textbf{Bus-off} (TEC $>$255): the node disconnects from the bus
+entirely and only rejoins after a recovery sequence. The mechanism makes a
+faulty node remove \emph{itself}, protecting the healthy traffic.
+
+\question{Q2.6}{What is an error frame and what does it do?}
+When a node detects an error (bit, stuff, CRC, form, or ACK error) it transmits
+an error flag --- six dominant bits for an active node --- which violates bit
+stuffing and forces every node to discard the current frame, and the
+transmitter to retry. This globalises a locally-detected error so no node
+accepts a corrupt frame, and it bumps the error counters that drive fault
+confinement.
+
+\question{Q2.7}{Name the five CAN error-detection mechanisms.}
+(1) \textbf{Bit error}: a transmitter reads back a different bit than it sent
+(outside arbitration/ack). (2) \textbf{Stuff error}: six consecutive identical
+bits (stuffing violated). (3) \textbf{CRC error}: computed CRC $\neq$ received.
+(4) \textbf{Form error}: a fixed-format field (delimiter, EOF) has the wrong
+value. (5) \textbf{ACK error}: no node acknowledged. Together they give CAN its
+very low undetected-error rate.
+
+\question{Q2.8}{How do acceptance filters work and why do they matter?}
+A receiver configures filter/mask register pairs: an incoming ID is accepted if
+\code{(id \^{} filter) \& mask == 0} --- the mask selects which ID bits must
+match. This lets a node ignore the bulk of bus traffic in hardware and interrupt
+the CPU only for relevant messages, which is essential on a busy bus where
+interrupting on every frame would swamp a small MCU. You design the ID scheme so
+a single mask captures a group of related messages.
+
+\question{Q2.9}{What is a remote frame (RTR)?}
+A frame with the RTR bit recessive and no data, used to \emph{request} that the
+node owning a given ID transmit its data frame. It's a pull mechanism, largely
+deprecated in modern designs (and absent in CAN FD) because it complicates
+timing and arbitration; most systems use periodic or event-driven data frames
+instead.
+
+\question{Q2.10}{What does CAN FD add, and what stays the same?}
+CAN FD keeps the same arbitration, IDs, and bus, but adds a larger payload (up
+to 64 bytes via a remapped DLC) and a \emph{bit-rate switch}: the data phase can
+run faster than the arbitration phase, since arbitration only needs the slow
+rate for bus-wide consensus while the payload --- sent by the single winner ---
+can go fast. It also has a stronger CRC. The result is much higher throughput
+without giving up CAN's deterministic arbitration.
+
+\question{Q2.11}{How is a drone servo typically controlled over CAN?}
+Via a higher-layer protocol (often CANopen-style or a vendor profile): the
+flight controller broadcasts a command message (target position/speed) with a
+known ID at a fixed rate, and the servo publishes status/feedback (actual
+position, current, temperature, faults) on its own ID. Arbitration guarantees
+the high-priority command and safety messages win the bus; acceptance filters
+let each servo grab only its command. This is exactly the MKS drone CAN servo
+interaction on the resume.
+
+\question{Q2.12}{What is CANopen and what problem does it solve?}
+CANopen is a standardised application layer over CAN that defines \emph{how} IDs
+and data are organised: an Object Dictionary (addressable parameters), PDOs
+(process data objects --- real-time data mapped to specific COB-IDs), SDOs
+(service data for configuration), and NMT (network management/heartbeat). It
+turns raw CAN frames into interoperable device profiles (e.g.\ for motors/
+servos), so devices from different vendors cooperate without each team
+inventing an ID map.
+
+\tierbanner{Tier 3 --- Trap \& depth (principal-engineer level)}%
+{A paragraph plus the trap. The defensible depth behind ``CAN servo lab work.''}
+
+\question{Q3.1}{A node keeps going bus-off on a busy bus. Walk the root-cause
+hunt.}
+Bus-off means its TEC exceeded 255 --- it repeatedly detected errors on its own
+transmissions. Causes, in order: (1) \textbf{bit-timing/bitrate mismatch} ---
+even a small sample-point or bitrate disagreement makes this node see bit/stuff
+errors while others are fine; (2) \textbf{termination} --- missing or wrong
+120\,$\Omega$ causes reflections that corrupt edges, worst for the node
+electrically furthest; (3) \textbf{a single faulty transceiver or stuck
+driver}; (4) \textbf{ground offset / common-mode} beyond the transceiver range.
+Method: scope CAN\_H/CAN\_L at the offending node for ringing (termination) and
+check its bit-timing registers against the others, and confirm with a bus
+analyser whether \emph{only} this node errors (its config) or everyone does (bus
+fault). \trap the junior reflex is ``reset the node''; bus-off is a \emph{symptom
+of physical or timing} disagreement, and the disciplined fix localises it on the
+scope plus the bit-timing config --- the oscilloscope root-cause work on the
+resume.
+
+\question{Q3.2}{Why is the sample point a design trade, and what breaks if it's
+wrong across the bus?}
+The sample point must be late enough that a bit driven by the furthest node has
+propagated across the whole bus (cable delay + transceiver delay) and settled
+before everyone samples --- otherwise nodes read the bit at different effective
+times and disagree. But placing it very late shrinks the margin for oscillator
+tolerance (phase-segment-2 is also where resynchronisation jitter is absorbed).
+So you trade bus length/propagation against clock-tolerance. If nodes are
+configured with \emph{different} sample points or bitrates, they intermittently
+disagree on marginal bits $\rightarrow$ stuff/bit errors $\rightarrow$ error
+frames $\rightarrow$ one node climbing to bus-off. \trap the trap is assuming
+``same bitrate'' is enough; the \emph{sample point} (TSEG1/TSEG2 split) must
+also match across the bus, which is the subtle cause of a single node that
+errors while the rest are happy.
+
+\question{Q3.3}{Arbitration guarantees the lowest ID wins --- how can that
+\emph{starve} a node, and how do you design around it?}
+If a high-priority ID is transmitted continuously (or too frequently), it can
+keep winning arbitration and a lower-priority node may rarely get the bus ---
+priority is strict, so there's no fairness. The fix is at design time: budget the
+bus load (sum of each periodic message's frame time $\times$ rate must leave
+headroom), assign IDs by genuine real-time urgency (safety/control low,
+diagnostics high), rate-limit chatty senders, and verify worst-case latency for
+each message against its deadline. \trap the trap is treating ID assignment as
+arbitrary labelling; on CAN the ID \emph{is} the scheduling priority, so a
+careless map can starve a real function. Real avionics/automotive design does a
+formal bus-load and worst-case-latency analysis --- the kind of integration
+rigour the resume's V\&V work implies.
+
+\question{Q3.4}{CAN's ACK only says ``someone heard it.'' Why is that
+insufficient for a command to a specific servo, and what do you layer on top?}
+A dominant ACK is pulled by \emph{any} receiving node, so a transmitter learns
+the frame was well-formed and at least one node got it --- not that the
+\emph{intended} servo received or acted on it. For a command you need
+application-level confirmation: the servo publishes feedback (achieved position/
+status) that the controller checks, plus heartbeats/node-guarding so a silent or
+dead servo is detected, and a safe default (hold/neutral) on command timeout.
+\trap the trap is trusting the CAN ACK as delivery-to-destination confirmation;
+it isn't. The robust control loop closes on the servo's \emph{feedback} message
+and treats missing feedback as a fault --- the same ``don't trust the
+link-layer, validate at the application layer'' discipline as the SPI/UART
+chapters, and the basis of safe actuator control (Chapter 10).
+
+\question{Q3.5}{Estimate whether a 500\,kbit/s bus can carry 20 servos at
+1\,kHz command + feedback, and what dominates.}
+A standard 8-byte frame is ~111 bits without stuffing, ~135 worst-case with
+stuffing, so at 500\,kbit/s a frame is ~222\,$\mu$s nominal (~270\,$\mu$s worst
+case). 20 servos $\times$ (1 command + 1 feedback) at 1\,kHz = 40000 frames/s
+$\times$ ~222\,$\mu$s $\approx$ 8.9 bus-seconds per second --- \emph{impossible}
+(way over 100\% load). So either the rate, node count, or payload must drop, or
+you move to CAN FD (64-byte frames batch many setpoints, and the fast data phase
+slashes per-byte time) or a higher bitrate. \trap the trap is sizing by data
+bytes alone and forgetting the ~44 bits of per-frame overhead plus stuffing and
+inter-frame space, which dominate for small frequent messages --- exactly why
+control buses either aggregate setpoints or move to CAN FD. Showing this
+back-of-envelope load calc is what marks real integration judgement.
+
+%=====================================================================
+\section{Coding Gym}
+%=====================================================================
+
+\begin{partnote}
+Thirteen host-compilable problems (verified under
+\code{gcc -Wall -Wextra -std=c11}) covering the bit-level and protocol
+arithmetic of CAN: arbitration, stuffing/de-stuffing, CRC-15, frame sizing and
+bus load, bit timing, fault confinement, filtering, and higher-layer ID
+decoding.
+\end{partnote}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Arbitration winner}
+
+\textbf{Problem.} Given two identifiers transmitted simultaneously, return
+which wins.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Lowest numeric ID wins (most dominant bits early).
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static int can_wins(uint32_t a, uint32_t b) {
+    return a < b;       /* lower ID = more dominant bits = higher priority */
+}
+
+int main(void) {
+    printf("A wins=%d\n", can_wins(0x100u, 0x200u));   /* 1 */
+    return 0;
+}
+\end{cgym}
+
+The whole genius of CAN is that this comparison happens \emph{on the wire},
+bit by bit, with no collision: the loser detects a dominant where it sent
+recessive and silently becomes a receiver. So priority is simply the numeric ID
+--- which is why the ID map \emph{is} your real-time schedule (Q3.3).
+
+\followups
+\begin{enumerate}
+\item \emph{``Find the first differing bit where B loses.''} $\rightarrow$
+  \code{clz}/scan of \code{a\^{}b} from the MSB.
+\item \emph{``Two nodes with the same ID?''} $\rightarrow$ Forbidden --- they'd
+  both ``win'' and their differing data causes bit errors; IDs must be unique
+  per sender.
+\item \emph{``Extended (29-bit) vs standard in arbitration?''} $\rightarrow$ A
+  standard frame wins a tie at the RTR/IDE point against an extended one with
+  the same 11-bit prefix.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Bit stuffing}
+
+\textbf{Problem.} Insert a stuff bit (opposite polarity) after every five
+consecutive identical bits.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Track the current run length and last value; on the 5th, emit the
+  opposite and reset the run to 1.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static int stuff_bits(const uint8_t *in, int n, uint8_t *out) {
+    int o = 0, run = 0, last = -1;
+    for (int i = 0; i < n; i++) {
+        int b = in[i];
+        out[o++] = (uint8_t)b;
+        if (b == last) run++; else { last = b; run = 1; }
+        if (run == 5) { int s = !b; out[o++] = (uint8_t)s; last = s; run = 1; }
+    }
+    return o;
+}
+
+int main(void) {
+    uint8_t in[6] = {1,1,1,1,1,1}, out[16];
+    int n = stuff_bits(in, 6, out);
+    printf("len=%d seq=", n);
+    for (int i = 0; i < n; i++) printf("%d", out[i]);   /* 1111101 */
+    printf("\n");
+    return 0;
+}
+\end{cgym}
+
+Six ones become \code{1111101}: after the fifth 1 a 0 is stuffed, then the sixth
+1 follows. Stuffing guarantees an edge at least every six bits so receivers can
+resynchronise their bit clock on a bus with no separate clock line --- and a
+\emph{missing} stuff bit (six identical) is itself a detectable error.
+
+\followups
+\begin{enumerate}
+\item \emph{``Why does worst-case framing grow with stuffing?''} $\rightarrow$
+  Each run of 5 adds a bit; the worst case (problem 12) inflates the frame.
+\item \emph{``Which fields are stuffed?''} $\rightarrow$ SOF through CRC; the
+  delimiters, ACK, EOF are fixed-form (not stuffed).
+\item \emph{``Six identical bits on the wire means?''} $\rightarrow$ A stuff
+  error (or an error flag) --- an intentional stuffing violation.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{De-stuffing (round-trip)}
+
+\textbf{Problem.} Remove stuff bits, recovering the original bit stream.
+
+\textbf{Hints.}
+\begin{itemize}
+\item After five identical bits, the next bit is a stuff bit --- skip it.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static int destuff_bits(const uint8_t *in, int n, uint8_t *out) {
+    int o = 0, run = 0, last = -1, i = 0;
+    while (i < n) {
+        int b = in[i++];
+        out[o++] = (uint8_t)b;
+        if (b == last) run++; else { last = b; run = 1; }
+        if (run == 5 && i < n) { last = in[i]; run = 1; i++; }   /* drop stuff bit */
+    }
+    return o;
+}
+
+int main(void) {
+    uint8_t stuffed[7] = {1,1,1,1,1,0,1}, out[16];
+    int n = destuff_bits(stuffed, 7, out);
+    printf("len=%d seq=", n);
+    for (int i = 0; i < n; i++) printf("%d", out[i]);   /* 111111 */
+    printf("\n");
+    return 0;
+}
+\end{cgym}
+
+De-stuffing is the exact inverse: count five identical received bits, then
+discard the following (stuff) bit. A correct round-trip (\code{stuff} then
+\code{destuff} returns the original, verified) is the property a receiver relies
+on; if the de-stuffer ever finds a \emph{sixth} identical bit instead of the
+expected opposite, that's a stuff error and the frame is rejected.
+
+\followups
+\begin{enumerate}
+\item \emph{``What if the stuff bit was corrupted to match?''} $\rightarrow$
+  Then six identical appear $\rightarrow$ stuff error detected; CRC also guards.
+\item \emph{``Why count the stuffed bit's value as the new run start?''}
+  $\rightarrow$ It can itself begin a new run that may need stuffing.
+\item \emph{``De-stuff in hardware vs software?''} $\rightarrow$ The CAN
+  controller does it; this models what it performs.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{CAN CRC-15}
+
+\textbf{Problem.} Compute the CAN 15-bit CRC (polynomial 0x4599) over a bit
+sequence.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Classic shift-register CRC: XOR the incoming bit with the top CRC bit;
+  shift; conditionally XOR the polynomial.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint16_t can_crc15(const uint8_t *bits, int n) {
+    uint16_t crc = 0;
+    for (int i = 0; i < n; i++) {
+        uint16_t inb = (uint16_t)(((crc >> 14) & 1u) ^ (bits[i] & 1u));
+        crc = (uint16_t)((crc << 1) & 0x7FFFu);    /* 15-bit register */
+        if (inb) crc ^= 0x4599u;                   /* CAN polynomial */
+    }
+    return crc;
+}
+
+int main(void) {
+    uint8_t bits[10] = {1,0,1,1,0,0,1,0,1,1};
+    printf("crc=0x%04X\n", can_crc15(bits, 10));   /* 0x6336 */
+    return 0;
+}
+\end{cgym}
+
+The 15-bit CRC over the frame (SOF through the data field) is what gives CAN its
+famously low undetected-error rate --- it catches all single- and double-bit
+errors and all burst errors up to 15 bits. The transmitter appends it; every
+receiver recomputes and a mismatch triggers an error frame and a retransmission.
+This is the link-layer integrity beneath any higher-layer protocol.
+
+\followups
+\begin{enumerate}
+\item \emph{``Why a CRC and not a checksum?''} $\rightarrow$ CRC catches burst
+  errors a sum misses --- critical on a noisy vehicle bus.
+\item \emph{``CAN FD CRC?''} $\rightarrow$ Longer (17- or 21-bit) for the larger
+  payloads, plus stuff-bit counting.
+\item \emph{``Does the CRC cover stuff bits?''} $\rightarrow$ No --- it's
+  computed on the de-stuffed bit stream.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Standard frame bit length}
+
+\textbf{Problem.} Compute the number of bits in a standard CAN frame (no
+stuffing) for a given DLC.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Sum the fixed fields + 8$\times$DLC data bits + EOF + IFS.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+static int can_std_frame_bits(int dlc) {
+    return 1 + 11 + 1 + 1 + 1 + 4   /* SOF, ID, RTR, IDE, r0, DLC */
+         + 8 * dlc                   /* data */
+         + 15 + 1 + 1 + 1 + 7 + 3;   /* CRC, CRCdelim, ACK, ACKdelim, EOF, IFS */
+}
+
+int main(void) {
+    printf("bits(dlc=8)=%d\n", can_std_frame_bits(8));   /* 111 */
+    return 0;
+}
+\end{cgym}
+
+An 8-byte standard frame is ~111 bits, of which ~44 are \emph{overhead}
+(everything but the data). That overhead is the key number for bus-load
+estimation: for small frequent messages the fixed cost dominates, which is why
+CAN FD's 64-byte payload (amortising the overhead) and faster data phase win for
+high-throughput control (Q3.5).
+
+\followups
+\begin{enumerate}
+\item \emph{``Extended frame?''} $\rightarrow$ Add 18 ID bits + SRR + IDE
+  changes ($\approx$20 more bits).
+\item \emph{``Why does overhead dominate small frames?''} $\rightarrow$ ~44
+  fixed bits vs 8--64 data bits --- the ratio is terrible for tiny payloads.
+\item \emph{``Where does the worst-case 135 come from?''} $\rightarrow$ Maximum
+  bit-stuffing on the stuffable fields (problem 12).
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Frame time and bus load}
+
+\textbf{Problem.} Compute a frame's transmission time at a given bitrate.
+
+\textbf{Hints.}
+\begin{itemize}
+\item time = bits / bitrate.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint32_t can_frame_us(int frame_bits, uint32_t bitrate) {
+    return (uint32_t)((uint64_t)frame_bits * 1000000u / bitrate);
+}
+
+int main(void) {
+    printf("us=%u\n", can_frame_us(111, 500000u));   /* 222 us */
+    return 0;
+}
+\end{cgym}
+
+111 bits at 500\,kbit/s is 222\,$\mu$s. Bus load is then
+$\sum(\text{frame\_us} \times \text{rate})$ over all periodic messages; keep it
+well under 100\% (often $<$70--80\% for latency headroom). This single
+calculation decides whether a proposed message set is even feasible --- the
+back-of-envelope every CAN integrator runs before committing an ID map
+(Q3.5).
+
+\followups
+\begin{enumerate}
+\item \emph{``Add 30\% for worst-case stuffing --- new time?''} $\rightarrow$
+  ~289\,$\mu$s; use the worst case for deadline analysis.
+\item \emph{``Why keep load under ~80\%?''} $\rightarrow$ Headroom bounds
+  worst-case arbitration latency for low-priority messages.
+\item \emph{``Highest-priority message's worst-case latency?''} $\rightarrow$
+  At most one in-progress frame ahead of it (non-preemptive), then it wins.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Bit timing: bitrate and sample point}
+
+\textbf{Problem.} From the CAN clock, prescaler, and segment counts, compute the
+bitrate and the sample-point percentage.
+
+\textbf{Hints.}
+\begin{itemize}
+\item $N_{tq}=1+\text{TSEG1}+\text{TSEG2}$; bitrate = clk / ((BRP+1)$\times
+  N_{tq}$); sample = (1+TSEG1)/$N_{tq}$.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint32_t can_bitrate(uint32_t fclk, int brp, int tseg1, int tseg2) {
+    int tq = 1 + tseg1 + tseg2;
+    return fclk / ((uint32_t)(brp + 1) * (uint32_t)tq);
+}
+static int can_sample_pct(int tseg1, int tseg2) {
+    int tq = 1 + tseg1 + tseg2;
+    return (1 + tseg1) * 100 / tq;
+}
+
+int main(void) {
+    printf("bitrate=%u sample=%d%%\n",
+           can_bitrate(40000000u, 4, 13, 2), can_sample_pct(13, 2));
+    /* 500000 bits/s, 87% sample point */
+    return 0;
+}
+\end{cgym}
+
+40\,MHz with BRP+1=5 and 16 time-quanta (TSEG1=13, TSEG2=2) gives exactly
+500\,kbit/s at an 87.5\% sample point. Every node on the bus must match the
+bitrate \emph{and} keep a compatible sample point (Q3.2) --- mismatch is the
+quiet cause of one node erroring its way to bus-off while the rest run fine.
+
+\followups
+\begin{enumerate}
+\item \emph{``Move the sample point earlier --- why would you?''} $\rightarrow$
+  More margin for oscillator tolerance, less for propagation; a short bus can
+  afford it.
+\item \emph{``Same bitrate, different BRP/segments --- compatible?''}
+  $\rightarrow$ Bitrate matches but sample points may differ; align them.
+\item \emph{``SJW (resync jump width)?''} $\rightarrow$ How many tq the node may
+  shrink/grow a segment to resync; bounds tolerable clock drift.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Fault-confinement state}
+
+\textbf{Problem.} Map a transmit error counter to error-active, error-passive,
+or bus-off.
+
+\textbf{Hints.}
+\begin{itemize}
+\item $<$128 active, $\geq$128 passive, $>$255 bus-off.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+typedef enum { ERR_ACTIVE, ERR_PASSIVE, BUS_OFF } can_err_t;
+
+static can_err_t can_state(int tec) {
+    if (tec > 255) return BUS_OFF;
+    if (tec > 127) return ERR_PASSIVE;
+    return ERR_ACTIVE;
+}
+
+int main(void) {
+    printf("%d %d %d\n", can_state(96), can_state(200), can_state(300));
+    /* ERR_ACTIVE(0) ERR_PASSIVE(1) BUS_OFF(2) */
+    return 0;
+}
+\end{cgym}
+
+This is CAN's self-protection: a node that keeps erroring climbs from active to
+passive (intrudes less on the bus) to bus-off (disconnects), so a babbling or
+broken node silences itself rather than jamming healthy traffic. Counters fall on
+successful frames, so a transient glitch recovers; only persistent faults reach
+bus-off, which requires an explicit recovery sequence to rejoin.
+
+\followups
+\begin{enumerate}
+\item \emph{``How does a node leave bus-off?''} $\rightarrow$ After 128
+  occurrences of 11 recessive bits (bus idle), it may reset its counters and
+  rejoin.
+\item \emph{``Active vs passive error flag difference?''} $\rightarrow$ Active =
+  6 dominant bits (forces all nodes); passive = 6 recessive (doesn't disturb a
+  healthy bus).
+\item \emph{``Why count TX errors more heavily?''} $\rightarrow$ A node erroring
+  its \emph{own} transmissions is more likely the faulty one.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{CANopen COB-ID decode}
+
+\textbf{Problem.} Split a CANopen COB-ID into its function code and node ID.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Node ID = low 7 bits; function code = next 4 bits.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static void cob_split(uint16_t cob, int *func, int *node) {
+    *func = (cob >> 7) & 0xF;     /* function code */
+    *node = cob & 0x7F;           /* node ID (1..127) */
+}
+
+int main(void) {
+    int f, n;
+    cob_split(0x181, &f, &n);
+    printf("func=%d node=%d\n", f, n);   /* func=3 (TPDO1), node=1 */
+    return 0;
+}
+\end{cgym}
+
+CANopen layers structure onto the raw 11-bit ID: the top 4 bits are a function
+code (0x3 = Transmit-PDO1, 0x4 = Receive-PDO1, etc.) and the low 7 are the node
+ID. So 0x181 is node 1's first transmit-PDO --- a servo broadcasting its
+feedback, for instance. This predefined connection set is why CANopen devices
+interoperate without a custom ID map (Q2.12).
+
+\followups
+\begin{enumerate}
+\item \emph{``What COB-ID is node 5's RPDO1?''} $\rightarrow$ Function 0x4
+  $\rightarrow$ \code{(0x4<<7)|5 = 0x205}.
+\item \emph{``Node 0 --- valid?''} $\rightarrow$ No; node IDs are 1--127, 0 is
+  reserved (broadcast/NMT).
+\item \emph{``What's at function code 0x0?''} $\rightarrow$ NMT / sync ---
+  network management, highest priority.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Acceptance filter match}
+
+\textbf{Problem.} Decide whether a received ID passes a filter/mask pair.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Pass when \code{((id \^{} filter) \& mask) == 0}.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static int filt_match(uint32_t id, uint32_t filter, uint32_t mask) {
+    return ((id ^ filter) & mask) == 0;   /* masked bits must equal the filter */
+}
+
+int main(void) {
+    printf("%d %d\n",
+           filt_match(0x123, 0x120, 0x7F0),   /* low nibble don't-care -> 1 */
+           filt_match(0x133, 0x120, 0x7F0));  /* bit 4 differs -> 0 */
+    return 0;
+}
+\end{cgym}
+
+The mask selects which ID bits must match the filter; \code{0} bits in the mask
+are ``don't care.'' Here mask \code{0x7F0} ignores the low nibble, so \code{0x120}
+--\code{0x12F} all pass --- one filter capturing a group of related messages.
+Hardware applies this before raising an interrupt, so the CPU only wakes for
+relevant traffic --- essential on a busy bus (Q2.8). Designing the ID layout so a
+single mask grabs each functional group is part of the bus design.
+
+\followups
+\begin{enumerate}
+\item \emph{``Match exactly one ID?''} $\rightarrow$ Set mask to all-ones over
+  the ID width.
+\item \emph{``Accept everything?''} $\rightarrow$ Mask = 0 (all don't-care).
+\item \emph{``Why filter in hardware?''} $\rightarrow$ To avoid an interrupt per
+  frame on a high-rate bus; the CPU can't keep up otherwise.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{DLC to data length (CAN FD mapping)}
+
+\textbf{Problem.} Convert a 4-bit DLC to the number of data bytes, including the
+CAN FD extended lengths.
+
+\textbf{Hints.}
+\begin{itemize}
+\item 0--8 map directly; 9--15 map to 12,16,20,24,32,48,64.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+static int dlc_to_len(int dlc) {
+    static const int m[16] = {0,1,2,3,4,5,6,7,8,12,16,20,24,32,48,64};
+    return (dlc >= 0 && dlc < 16) ? m[dlc] : 0;
+}
+
+int main(void) {
+    printf("dlc9=%d dlc15=%d\n", dlc_to_len(9), dlc_to_len(15));   /* 12 64 */
+    return 0;
+}
+\end{cgym}
+
+In classic CAN a DLC above 8 still means 8 bytes; CAN FD repurposes codes 9--15
+for the larger payloads (12 up to 64 bytes). A receiver must use this table, not
+``DLC = byte count,'' or it mis-parses FD frames. The big jumps (24$\rightarrow$
+32$\rightarrow$48$\rightarrow$64) are why FD batches many small setpoints into
+one frame to beat the per-frame overhead.
+
+\followups
+\begin{enumerate}
+\item \emph{``Classic CAN with DLC=12 --- how many bytes?''} $\rightarrow$ 8
+  (values $>$8 clamp to 8 in classic CAN).
+\item \emph{``Why non-contiguous lengths?''} $\rightarrow$ A 4-bit field can't
+  encode every value to 64, so FD picks useful steps.
+\item \emph{``Pack 6 servo setpoints (2 bytes each) into one frame.''}
+  $\rightarrow$ 12 bytes $\rightarrow$ DLC 9; one FD frame instead of six classic
+  frames.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{Worst-case frame length with stuffing}
+
+\textbf{Problem.} Given the number of stuffable bits, compute the worst-case
+length after maximum bit stuffing.
+
+\textbf{Hints.}
+\begin{itemize}
+\item Worst case adds one stuff bit per four bits after the first:
+  \code{n + (n-1)/4}.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdio.h>
+
+static int worst_case_stuffed(int stuffable_bits) {
+    return stuffable_bits + (stuffable_bits - 1) / 4;
+}
+
+int main(void) {
+    printf("worst(34)=%d\n", worst_case_stuffed(34));   /* 42 */
+    return 0;
+}
+\end{cgym}
+
+Maximum stuffing inserts a bit roughly every four (a run of 5 forces one, then
+the pattern can repeat), so the stuffable region grows by \code{(n-1)/4}. Applied
+to a full 8-byte frame's stuffable fields this is how the ~111-bit nominal frame
+reaches the famous ~135-bit worst case --- the number you \emph{must} use for
+real-time latency analysis, because an adversarial data pattern can always force
+it.
+
+\followups
+\begin{enumerate}
+\item \emph{``Why use worst case, not average, for deadlines?''} $\rightarrow$
+  Real-time guarantees must hold for the worst data pattern, not the typical
+  one.
+\item \emph{``Can you avoid stuffing?''} $\rightarrow$ No --- it's mandatory;
+  you can only bound its worst case.
+\item \emph{``Does the fixed-form EOF/ACK get stuffed?''} $\rightarrow$ No, so
+  they're excluded from the stuffable count.
+\end{enumerate}
+\end{gymproblem}
+
+%---------------------------------------------------------------
+\begin{gymproblem}{J1939 PGN extraction}
+
+\textbf{Problem.} Extract the Parameter Group Number from a 29-bit J1939
+identifier.
+
+\textbf{Hints.}
+\begin{itemize}
+\item PF (PDU format) = bits 16--23. If PF $<$ 240 (PDU1), PS is a destination
+  address (not in the PGN); if PF $\geq$ 240 (PDU2), PS is the group extension.
+\end{itemize}
+
+\attempt
+
+\textbf{Solution.}
+\begin{cgym}
+#include <stdint.h>
+#include <stdio.h>
+
+static uint32_t j1939_pgn(uint32_t ext_id) {
+    uint32_t pf = (ext_id >> 16) & 0xFFu;
+    uint32_t ps = (ext_id >> 8)  & 0xFFu;
+    uint32_t dp = (ext_id >> 24) & 0x3u;     /* data page bits */
+    return (pf < 240u) ? ((dp << 16) | (pf << 8))          /* PDU1: dest addr excluded */
+                       : ((dp << 16) | (pf << 8) | ps);    /* PDU2: PS is group ext   */
+}
+
+int main(void) {
+    printf("pgn=%u\n", j1939_pgn(0x18FEF100u));   /* 65265 (vehicle speed etc.) */
+    return 0;
+}
+\end{cgym}
+
+J1939 (trucks, gensets, some UAV/marine systems) layers a structured 29-bit ID:
+priority, data page, PF, PS, and source address. The PGN names the message
+\emph{content} (e.g.\ 65265 is a standard vehicle-dynamics group). The
+PDU1/PDU2 split --- whether PS is a destination address or part of the PGN ---
+is the subtlety that trips up naive parsers. Recognising these higher layers
+(CANopen, J1939) signals you've worked above raw frames.
+
+\followups
+\begin{enumerate}
+\item \emph{``Extract the source address.''} $\rightarrow$ Low 8 bits of the ID.
+\item \emph{``Priority?''} $\rightarrow$ Top 3 bits (bits 26--28).
+\item \emph{``Why does PDU1 exclude PS from the PGN?''} $\rightarrow$ PS is the
+  \emph{destination address} for point-to-point messages, not part of the group
+  identity.
+\end{enumerate}
+\end{gymproblem}
+
+%=====================================================================
+\section{Link to Her Resume}
+%=====================================================================
+
+\begin{resumelink}
+\textbf{Drone-servo CAN lab work:} ``I work with CAN servos and CAN across the
+UAV LRUs. A servo takes a periodic command on a known ID and publishes feedback
+on its own ID; arbitration guarantees the high-priority command and safety
+messages win the bus, and acceptance filters let each servo grab only its
+command in hardware.''
+
+\medskip
+\textbf{Bus integrity \& bring-up:} ``A node going bus-off is a timing or
+physical disagreement, not a software glitch --- I scope CAN\_H/CAN\_L for
+ringing (termination) and check the bit-timing and sample point against the rest
+of the bus, the same oscilloscope root-cause method I use across protocols.''
+
+\medskip
+\textbf{Integration judgement:} ``Before committing an ID map I run a bus-load
+and worst-case-latency check --- per-frame overhead and stuffing dominate small
+frequent messages, so control buses aggregate setpoints or move to CAN FD.''
+
+\medskip
+\small Maps to the resume's CAN servo / multi-LRU work and oscilloscope-based
+root-cause analysis. Keep claims to what the resume states; deep project
+scripting is Chapter 15, from \code{inputs/INTAKE.md} only.
+\end{resumelink}
+
+%=====================================================================
+\section{Self-Test Scorecard}
+%=====================================================================
+
+\begin{scorecard}
+\begin{enumerate}
+\item What makes a bit dominant, and why does that enable collision-free
+  arbitration?
+\item Which CAN ID wins arbitration, and what does the loser do?
+\item What is bit stuffing and why is it needed?
+\item Name the five CAN error-detection mechanisms.
+\item What are the three fault-confinement states and their thresholds?
+\item What does the ACK slot actually tell the transmitter --- and what does it
+  not?
+\item Compute the bitrate and sample point for 40\,MHz, BRP+1=5, TSEG1=13,
+  TSEG2=2.
+\item How does an acceptance filter/mask decide to accept an ID?
+\item What does CAN FD add while keeping arbitration the same?
+\item Roughly how many bits is an 8-byte standard frame, and why does that
+  matter?
+\end{enumerate}
+\end{scorecard}
+
+\begin{answerkey}
+\begin{enumerate}
+\item Dominant (0) overrides recessive (1) on the wired-AND bus, so a node that
+  sends recessive but reads dominant has lost --- contention resolves bit by bit
+  with no collision.
+\item The lowest numeric ID wins; the loser stops transmitting and becomes a
+  receiver, with no data lost.
+\item Inserting an opposite bit after five identical ones; it guarantees edges
+  for receiver resynchronisation on a clockless bus.
+\item Bit error, stuff error, CRC error, form error, ACK error.
+\item Error-active ($<$128), error-passive ($\geq$128), bus-off (TEC $>$255).
+\item That the frame was well-formed and at least one node received it; not
+  \emph{which} node, nor that the intended node acted on it.
+\item 500\,kbit/s, 87.5\% sample point ($N_{tq}=16$, $(1+13)/16$).
+\item Accept when \code{((id \^{} filter) \& mask) == 0} --- masked bits must
+  match the filter, zero-mask bits are don't-care.
+\item Up to 64-byte payloads and a faster data-phase bitrate (and stronger CRC),
+  with the same arbitration/IDs.
+\item ~111 bits (~44 of overhead); it sets bus load and shows why small frequent
+  messages are overhead-dominated (push toward CAN FD/aggregation).
+\end{enumerate}
+\end{answerkey}
+
+\begin{partnote}
+\emph{End of Chapter 7.} Next: \textbf{Avionics Data Buses} ---
+MIL-STD-1553B, ARINC 429, Ethernet for telemetry, and cross-channel/redundancy
+concepts (CCDL/SPIL-type links), connecting CAN's ideas to the
+flight-grade buses on the resume.
+\end{partnote}
