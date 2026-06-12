@@ -29,70 +29,93 @@ sentences for questions beyond your scope. The technical framing for each is
 already in the chapters cross-referenced below; only the \emph{personal facts}
 are missing.
 
+\begin{keyidea}
+\textbf{Keep the two employers' domains separate} --- this is what makes every
+answer consistent. \textbf{TASL (current, UAV R\&D):} UAV DFCC \& signal-
+conditioning cards, UAV LRU integration, board bring-up, RS422 Embedded C
+interface development, multi-protocol bring-up. \textbf{BEL (LCA Tejas,
+flight-critical):} DFCC verification, CCDL, SPIL, DPRAM, MIL-STD-1553B Python
+automation, DO-178B Level A. Never let CCDL/SPIL drift into the TASL story or
+the UAV board bring-up into the BEL story.
+\end{keyidea}
+
 %=====================================================================
-\section{Project 1 --- DFCC / AETS-DFCC SC Card Validation}
+\section{TASL --- UAV R\&D (Current Role)}
 %=====================================================================
-\emph{Technical framing: Chapters 8 (avionics buses), 11 (bring-up/debug), 12
-(V\&V). Resume basis: TASL DFCC and signal-conditioning card validation.}
+
+\subsection{Project 1 --- UAV DFCC Card Validation}
+\emph{Framing: Chapters 8 (avionics buses), 11 (bring-up/debug), 12 (V\&V).}
 \begin{itemize}
 \item \textbf{[NEEDS INTAKE: Q1 --- exactly what signals/parameters do you check
-  on a DFCC/SC card, and the pass/fail criteria?]}
+  on a UAV DFCC card, and the pass/fail criteria?]}
 \item \textbf{[NEEDS INTAKE: Q2 --- one real defect you found and how it was
   resolved (symptom, root cause, fix, how verified)?]}
-\item \textbf{[NEEDS INTAKE: Q3 --- which instruments you use and which boards you
-  flash, in this project specifically?]}
-\item \textbf{[NEEDS INTAKE: Q4 --- your exact role vs the team's (what did YOU do
-  vs others)?]}
 \end{itemize}
 
-%=====================================================================
-\section{Project 2 --- CCDL Verification}
-%=====================================================================
-\emph{Technical framing: Chapter 8 (CCDL, voting, failover), Chapter 10
-(redundant control). Resume basis: CCDL data integrity, timing, failover.}
+\subsection{Project 2 --- AETS-DFCC Signal-Conditioning Card Integration}
+\emph{Framing: Chapters 11 (lab/debug), 10 (signal/sensor), 8.}
 \begin{itemize}
-\item \textbf{[NEEDS INTAKE: Q5 --- what specifically do you verify on the CCDL
-  (which data, what timing bound, what failover behaviour), and how?]}
-\item \textbf{[NEEDS INTAKE: Q6 --- any concrete number: frame rate, latency
-  bound, channel count? Only if real.]}
+\item \textbf{[NEEDS INTAKE: Q3 --- which sensor/analog signals does the SC card
+  condition, and what do you verify on the acquisition/conditioning path?]}
+\item \textbf{[NEEDS INTAKE: Q4 --- which instruments (oscilloscope, DMM,
+  electronic load) and what measurements?]}
 \end{itemize}
 
-%=====================================================================
-\section{Project 3 --- SPIL Serial Data Link Testing}
-%=====================================================================
-\emph{Technical framing: Chapters 5 (serial/RS422), 8 (serial inter-card links).
-Resume basis: SPIL packet-level analysis and diagnostics.}
+\subsection{Project 3 --- UAV LRU Integration \& Board Bring-up}
+\emph{Framing: Chapters 11 (bring-up sequence), 3 (boards/MCU), 4--8 (interfaces).}
 \begin{itemize}
-\item \textbf{[NEEDS INTAKE: Q7 --- what does the SPIL link carry, and what do you
-  test at the packet level (framing, integrity, timing, loss behaviour)?]}
-\item \textbf{[NEEDS INTAKE: Q8 --- the tools and the exact diagnostics you run?]}
+\item \textbf{[NEEDS INTAKE: Q5 --- which boards do you bring up (autopilot
+  v2.2/4.0/4.1/6.1, PDU, IRNSS, VMNSC, baseboard) and what's your bring-up
+  sequence with ST-Link/J-Link?]}
+\item \textbf{[NEEDS INTAKE: Q6 --- which LRUs do you integrate (PSU200, AU, AIU,
+  INSU, CAN servos, radio, pitot/Laversab) and what does integration involve?]}
 \end{itemize}
 
-%=====================================================================
-\section{Project 4 --- RS422 Embedded C Interface Routines}
-%=====================================================================
-\emph{Technical framing: Chapters 1 (Embedded C), 5 (RS422). Resume basis: RS422
-Embedded C test/interface routines on the DFCC.}
+\subsection{Project 4 --- RS422 Embedded C Interface Development}
+\emph{Framing: Chapters 1 (Embedded C), 5 (RS422).}
 \begin{itemize}
-\item \textbf{[NEEDS INTAKE: Q9 --- what do the Embedded C routines you write
-  actually do (test routines? interface code? what function)?]}
-\item \textbf{[NEEDS INTAKE: Q10 --- roughly how much code, on what target, and
+\item \textbf{[NEEDS INTAKE: Q7 --- what do the RS422 Embedded C interface/test
+  routines you write actually do (interface code? test harness? what function)?]}
+\item \textbf{[NEEDS INTAKE: Q8 --- roughly how much code, on what target, and
   how is it verified?]}
 \end{itemize}
 
 %=====================================================================
-\section{Project 5 --- BEL DPRAM + MIL-STD-1553B Python Automation}
+\section{BEL --- LCA Tejas, Flight-Critical Avionics (Previous Role)}
 %=====================================================================
-\emph{Technical framing: Chapters 9 (DPRAM handshake), 8 (1553B), 14 (Python
-automation), 12 (V\&V). Resume basis: ARM9/LPC3250 firmware, real-time DPRAM
-(sub-1\,ms), Python suite parsing 1553B/RS422 (about 60\% regression saving).}
+
+\subsection{Project 5 --- CCDL Verification}
+\emph{Framing: Chapter 8 (CCDL, voting, failover), Chapter 10 (redundant control).}
 \begin{itemize}
-\item \textbf{[NEEDS INTAKE: Q11 --- the DPRAM polling architecture you validated:
-  what data, what made it sub-1\,ms, your role in it?]}
-\item \textbf{[NEEDS INTAKE: Q12 --- the Python suite: what it parsed, how the
-  ~60\% number was measured (baseline vs after)?]}
-\item \textbf{[NEEDS INTAKE: Q13 --- the white-box firmware testing on ARM9: what
-  you actually tested and found?]}
+\item \textbf{[NEEDS INTAKE: Q9 --- what specifically do you verify on the CCDL
+  (which data, what timing bound, what failover/redundancy behaviour), and how?]}
+\item \textbf{[NEEDS INTAKE: Q10 --- any concrete number: frame rate, latency
+  bound, channel count? Only if real.]}
+\end{itemize}
+
+\subsection{Project 6 --- SPIL Verification}
+\emph{Framing: Chapters 5 (serial/RS422), 8 (serial inter-card links).}
+\begin{itemize}
+\item \textbf{[NEEDS INTAKE: Q11 --- what does the SPIL link carry, and what do
+  you test at the packet level (framing, integrity, timing, loss behaviour)?]}
+\item \textbf{[NEEDS INTAKE: Q12 --- the tools and the exact diagnostics you run?]}
+\end{itemize}
+
+\subsection{Project 7 --- DPRAM Architecture Validation}
+\emph{Framing: Chapter 9 (DPRAM handshake), 4 (shared data), 3 (ARM9/LPC3250).}
+\begin{itemize}
+\item \textbf{[NEEDS INTAKE: Q13 --- the real-time DPRAM polling architecture you
+  validated: what data/command handshakes, what made it sub-1\,ms, your role?]}
+\item \textbf{[NEEDS INTAKE: Q14 --- the white-box firmware testing on LPC3250
+  (ARM9): what you actually tested and found; the BSP/RTSM/driver work?]}
+\end{itemize}
+
+\subsection{Project 8 --- MIL-STD-1553B Python Automation}
+\emph{Framing: Chapters 14 (Python automation), 8 (1553B), 12 (V\&V).}
+\begin{itemize}
+\item \textbf{[NEEDS INTAKE: Q15 --- the Python suite: what it parsed (1553B /
+  RS422), how it was built, how the about-60\% number was measured (baseline vs
+  after)?]}
 \end{itemize}
 
 %=====================================================================

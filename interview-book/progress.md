@@ -293,6 +293,29 @@ to approach budget without filler.
 - Not done (low value): no `\index` (PLAN session 18) --- skipped deliberately.
 - Compiled clean: **196 pp, zero LaTeX warnings**.
 
+### Session 17 — Resume audit + BEL/TASL attribution correction
+- **Audited resume** against the original (ground-truth) PDF + user's explicit
+  BEL/TASL domain split. Found the rebuild well-sourced but with a critical
+  **misattribution**: CCDL & SPIL were placed at TASL; they are **BEL/LCA-Tejas**
+  work.
+- **Rewrote the resume** (resume/Sushmita_Telasang_Resume.tex):
+  - Repositioned header + summary as Embedded Systems / UAV Avionics / HSI /
+    Flight Control (testing shown as a capability, not the identity).
+  - Corrected attribution: TASL = UAV DFCC, signal-conditioning, LRU
+    integration, board bring-up, RS422 Embedded C, multi-protocol; BEL = DFCC +
+    CCDL + SPIL verification, DPRAM, 1553B Python automation, DO-178B Level A.
+  - Engineering-forward verbs (Develop/Bring up/Debug/Integrate) in TASL bullets.
+  - Clarified EMC = External Memory Controller (vs MIL-STD-461 EMI/EMC); spelled
+    out RTSM = Real-Time Software Module; added a V&V-capabilities line.
+  - Added microtype; 2 pages, **zero LaTeX warnings**.
+- **Fixed the book to match:**
+  - Ch 15 restructured into 8 employer-split projects (4 TASL + 4 BEL) with a
+    keyidea box enforcing the BEL/TASL separation; bookmark nesting fixed.
+  - Ch 8 resume-link/partnote attribution corrected (CCDL/SPIL -> BEL).
+  - Ch 17 Mock-1 two-minute pitch rewritten to the repositioned,
+    employer-separated narrative.
+  - Book rebuilt: 196 pp, **zero LaTeX warnings**.
+
 ## Open flags / [VERIFY] / [NEEDS INTAKE] items
 - **Chapters 15 & 16 are HARD-BLOCKED.** Per PLAN.md Section 5 and CLAUDE.md,
   they must be written ONLY from `inputs/INTAKE.md`, and every REQUIRED

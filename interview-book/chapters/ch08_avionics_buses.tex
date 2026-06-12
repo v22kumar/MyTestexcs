@@ -15,9 +15,10 @@ command--response) $\rightarrow$ ARINC 429 (label, SDI, SSM, word format)
 $\rightarrow$ Ethernet TCP vs UDP for telemetry $\rightarrow$ redundancy \&
 cross-channel data links (voting, failover --- the CCDL family) $\rightarrow$
 generic serial processing links (SPIL-type) $\rightarrow$ telemetry packet
-structure \& parsing. This chapter maps directly onto the resume:
-MIL-STD-1553B and RS422 telemetry parsing at BEL, CCDL and SPIL verification at
-TASL.
+structure \& parsing. This chapter maps directly onto the resume: at \textbf{BEL}
+(LCA Tejas), MIL-STD-1553B/RS422 telemetry parsing and CCDL \& SPIL verification;
+at \textbf{TASL} (UAV R\&D), DFCC and signal-conditioning card integration and the
+UAV LRU set.
 \end{partnote}
 
 Where CAN (Chapter 7) is the vehicle/robotics bus, these are the
@@ -784,10 +785,11 @@ I test it at the packet level --- framing, integrity, timing, and behaviour
 under loss --- the same byte-level rigour I apply to every serial interface.''
 
 \medskip
-\small Maps directly to the resume: 1553B/RS422 telemetry parsing and the Python
-automation at BEL, CCDL and SPIL verification at TASL. Keep claims to what the
-resume states; the deep, defensible project scripting is Chapter 15, built only
-from \code{inputs/INTAKE.md}.
+\small Maps directly to the resume: at BEL (LCA Tejas) --- 1553B/RS422 telemetry
+parsing, the Python automation, and CCDL \& SPIL verification under DO-178B Level
+A. (At TASL the avionics work is UAV DFCC / signal-conditioning / LRU
+integration.) Keep claims to what the resume states; the deep, defensible project
+scripting is Chapter 15, built only from \code{inputs/INTAKE.md}.
 \end{resumelink}
 
 %=====================================================================
