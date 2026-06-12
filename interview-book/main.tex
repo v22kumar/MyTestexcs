@@ -35,23 +35,55 @@
 
 \tableofcontents
 
-% ---------- Chapters (uncomment as they are written) ----------
+% ---------- Front matter ----------
+\include{chapters/ch00_introduction}
+
+% ---------- Part A ----------
+\bookpart{A}{Embedded C \& Processor Core}{The make-or-break foundation: the C
+language as a hardware interface, the memory map it runs on, the ARM core that
+executes it, and the interrupts that drive real-time behaviour. Every later part
+leans on this one.}
 \include{chapters/ch01_embedded_c}
 \include{chapters/ch02_memory_toolchain}
 \include{chapters/ch03_arm_architecture}
 \include{chapters/ch04_interrupts_timers_dma}
+
+% ---------- Part B ----------
+\bookpart{B}{Communication Protocols}{Your strongest selling point --- the buses
+that carry the data. Asynchronous serial (UART/RS422/485), the synchronous pair
+(SPI/I2C), CAN, and the flight-grade avionics buses (1553B, ARINC 429, CCDL,
+SPIL). Bulletproof these.}
 \include{chapters/ch05_uart_rs_serial}
 \include{chapters/ch06_spi_i2c}
 \include{chapters/ch07_can_bus}
 \include{chapters/ch08_avionics_buses}
+
+% ---------- Part C ----------
+\bookpart{C}{Systems \& Domain}{Where facts become judgement: real-time
+scheduling and the DPRAM handshake, control \& PID, the lab bench and
+board bring-up, and the V\&V/DO-178B discipline that wraps all of it.}
 \include{chapters/ch09_rtos_realtime}
 \include{chapters/ch10_control_pid}
 \include{chapters/ch11_debugging_lab}
 \include{chapters/ch12_vnv_do178}
+
+% ---------- Part D ----------
+\bookpart{D}{The Coding Gym}{Pure practice for the coding rounds: 60 graded
+Embedded C problems and 15 Python automation problems. Attempt every one on
+paper before reading the solution --- that is where the 88\% comes from.}
 \include{chapters/ch13_coding_gym}
 \include{chapters/ch14_python_automation}
+
+% ---------- Part E ----------
+\bookpart{E}{Interview Execution}{Converting knowledge into an offer: your
+project deep-dives (from your real facts), the behavioural and company rounds,
+and five full mock interviews to rehearse the whole thing under time.}
 \include{chapters/ch15_project_deepdives}
 \include{chapters/ch16_behavioral_company}
 \include{chapters/ch17_mock_interviews}
+
+% ---------- Appendix ----------
+\appendix
+\include{chapters/ch18_cheatsheet}
 
 \end{document}

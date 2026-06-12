@@ -1,0 +1,179 @@
+% chapters/ch18_cheatsheet.tex — Appendix A: Quick Reference Cheat Sheet
+% A friendly one-stop recap of the must-know facts and formulas. No new code
+% (everything here is verified in its home chapter). Included under \appendix.
+\chapter{Quick Reference Cheat Sheet}
+\label{ch:cheatsheet}
+
+\begin{keyidea}
+The night before the interview, read \emph{only} this. It's the distilled spine
+of the whole book --- the facts and formulas you must have cold. Each line points
+back to the chapter where it's earned.
+\end{keyidea}
+
+\section*{Embedded C (Ch 1)}
+\begin{itemize}
+\item \code{volatile} = \emph{visibility} (re-read every time), \textbf{not}
+  atomicity or ordering. Memory-mapped regs, ISR-shared globals.
+\item \code{const} = a promise not to write through this name. A read-only
+  register is \code{volatile const}.
+\item \code{static}: on a local $\rightarrow$ persists across calls; at file
+  scope $\rightarrow$ private (internal linkage).
+\item Pointer arithmetic is \emph{typed}: \code{p+1} moves \code{sizeof(*p)}
+  bytes.
+\item Struct padding: order members \textbf{largest-first} to shrink; pack only
+  for wire/register layouts.
+\item Read declarations right-to-left: \code{char *const p} = const pointer to
+  char.
+\item Wire data: extract fields with \textbf{shifts \& masks}, never a bitfield
+  struct cast (endianness + impl-defined layout).
+\end{itemize}
+
+\section*{Memory \& Toolchain (Ch 2)}
+\begin{itemize}
+\item Segments: \code{.text} (code, flash), \code{.rodata} (const, flash),
+  \code{.data} (init RW, RAM, copied from flash), \code{.bss} (zero RW, RAM,
+  zeroed by startup), stack (down), heap (up).
+\item Startup before \code{main}: set SP $\rightarrow$ copy \code{.data}
+  $\rightarrow$ zero \code{.bss} $\rightarrow$ ctors $\rightarrow$ \code{main}.
+\item Build: preprocess $\rightarrow$ compile $\rightarrow$ assemble
+  $\rightarrow$ link. ``Undefined reference'' \& ``multiple definition'' are
+  \emph{link} errors.
+\item ``Works in debugger, fails from reset'' $\rightarrow$ usually startup
+  \code{.bss}/\code{.data} or \code{VTOR}/clock.
+\item Flight-grade: no heap --- static pools / arenas, sized at link time.
+\end{itemize}
+
+\section*{ARM \& MCU (Ch 3)}
+\begin{itemize}
+\item \code{R13}=SP (\code{MSP}/\code{PSP}), \code{R14}=LR, \code{R15}=PC.
+  Vector table word~0 = initial \code{MSP}, word~1 = reset handler.
+\item NVIC: lower priority \emph{number} = higher urgency; sub-priority never
+  pre-empts.
+\item Open-drain needs a pull-up (I2C); push-pull drives both rails.
+\item MPU = protection only; MMU = address translation (ARM9/LPC3250 has an
+  MMU).
+\item \code{SYSCLK} (STM32F4): \code{VCO = HSE/M*N}, \code{SYSCLK = VCO/P}.
+\end{itemize}
+
+\section*{Interrupts, Timers, DMA (Ch 4)}
+\begin{itemize}
+\item ISR rule: short, non-blocking; no \code{malloc}/\code{printf}/long loops.
+  Clear the source flag.
+\item Shared data fixes: \code{volatile} (visibility) + barrier (ordering) +
+  critical section / atomic (atomicity). \code{counter++} is \emph{not} atomic.
+\item Lock-free SPSC ring buffer: single writer per index $\rightarrow$ no lock.
+\item Timer: $f=\dfrac{f_{\text{tim}}}{(\text{PSC}+1)(\text{ARR}+1)}$;\quad
+  duty $=\dfrac{\text{CCR}}{\text{ARR}+1}$.
+\item Jitter matters more than latency for control. Watchdog: kick only on
+  \emph{proof of progress}.
+\item DMA for high-rate streams (interrupt per block, not per byte).
+\end{itemize}
+
+\section*{Serial / SPI / I2C (Ch 5--6)}
+\begin{itemize}
+\item UART frame 8N1 = 10 bit-times. \code{BRR}$=f_{\text{ck}}/\text{baud}$;
+  keep error $<$2\%.
+\item RS232 single-ended (short); RS422/485 differential (long, noise-immune).
+  RS422 = full-duplex point-to-point; RS485 = half-duplex multidrop (manage
+  DE).
+\item Terminate differential pairs at the ends (120\,$\Omega$).
+\item SPI mode = (CPOL, CPHA); master \& slave must match. Full-duplex, one CS
+  per slave.
+\item I2C: open-drain, START/STOP, 7-bit addr + R/W, ACK each byte; NACK the
+  last read byte. Clock stretching; bus-clear = 9 SCL pulses.
+\end{itemize}
+
+\section*{CAN (Ch 7)}
+\begin{itemize}
+\item Dominant (0) beats recessive (1); lowest ID wins arbitration, no
+  collision.
+\item Bit stuffing after 5 equal bits. 5 error checks: bit, stuff, CRC, form,
+  ACK.
+\item Fault confinement: error-active $<$128, error-passive $\ge$128, bus-off
+  TEC $>$255.
+\item Bitrate $=\dfrac{f_{\text{clk}}}{(\text{BRP}+1)\,N_{tq}}$,
+  $N_{tq}=1+\text{TSEG1}+\text{TSEG2}$; sample point $\approx$ 75--87.5\%.
+\item ACK only means ``someone heard it'' --- close the loop on servo feedback.
+\end{itemize}
+
+\section*{Avionics Buses (Ch 8)}
+\begin{itemize}
+\item 1553B: Bus Controller commands; Remote Terminals respond; Bus Monitor
+  listens. Command/status/data words, dual-redundant, Manchester-coded.
+\item ARINC 429: one-way broadcast; label (octal, bit-reversed), SDI, data,
+  \textbf{SSM} (check validity!), odd parity.
+\item Telemetry uses \textbf{UDP} (freshness $>$ reliability).
+\item Redundancy: dual = fail-\emph{safe} (detect); triple = fail-\emph{operational}
+  (median vote masks one fault). CCDL exchanges + votes every frame.
+\end{itemize}
+
+\section*{RTOS \& Real-Time (Ch 9)}
+\begin{itemize}
+\item Mutex = protect a resource (ownership + priority inheritance); semaphore =
+  signal/count; queue = pass data.
+\item Priority inversion: high blocked on low's mutex, medium preempts low
+  $\rightarrow$ fix with \textbf{priority inheritance}.
+\item Deadlock needs all 4 (mutual excl., hold-and-wait, no preempt, circular
+  wait); break circular wait with a \textbf{global lock order}.
+\item RMS: shorter period = higher priority; schedulable if
+  $U=\sum c_i/t_i \le n(2^{1/n}-1)$ ($\rightarrow$ 0.69).
+\item DPRAM handshake: write payload $\rightarrow$ barrier $\rightarrow$ set
+  flag; reader: flag $\rightarrow$ barrier $\rightarrow$ read $\rightarrow$
+  clear.
+\end{itemize}
+
+\section*{Control \& PID (Ch 10)}
+\begin{itemize}
+\item $u = K_p e + K_i\!\int e\,dt + K_d\,\dfrac{de}{dt}$. P = present, I = past,
+  D = future.
+\item Costs: P $\rightarrow$ overshoot \& steady-state error; I $\rightarrow$
+  lag \& windup; D $\rightarrow$ noise.
+\item Fixes: anti-windup (freeze integral when saturated), derivative on
+  \emph{measurement} (no kick), filter the sensor.
+\item Ziegler--Nichols: $K_p=0.6K_u$, $K_i=1.2K_u/T_u$, $K_d=0.075K_uT_u$.
+\item Constant low-jitter sample period (the discrete $\times dt$ / $\div dt$
+  assume it).
+\end{itemize}
+
+\section*{Debugging \& Lab (Ch 11)}
+\begin{itemize}
+\item Scope = electrical (edges, ringing, levels); logic analyser = content
+  (bytes, protocol). Probe \textbf{at the receiver}.
+\item Bring-up order: power $\rightarrow$ clocks $\rightarrow$ reset
+  $\rightarrow$ debug $\rightarrow$ peripherals (measure at each).
+\item Breakpoint = address; watchpoint = data access (catches ``who corrupted
+  this?'').
+\item JTAG (4--5 wire) vs SWD (2 wire); ST-Link (STM32) vs J-Link (broad, RTT).
+\end{itemize}
+
+\section*{V\&V \& DO-178B (Ch 12)}
+\begin{itemize}
+\item Verification = built it right; validation = built the right thing.
+\item Coverage strictness: statement $<$ branch $<$ \textbf{MC/DC} (each
+  condition independently flips the outcome; $\sim$$N+1$ tests).
+\item DO-178B: A (catastrophic, MC/DC) $\rightarrow$ B (branch) $\rightarrow$ C
+  (statement) $\rightarrow$ D $\rightarrow$ E.
+\item 100\% requirements-to-test traceability; ATP/QTP; HIL; fault injection;
+  5-why root cause; AS9100 (QMS).
+\item ``100\% coverage + all pass'' $\neq$ correct (missing/wrong requirement,
+  timing race).
+\end{itemize}
+
+\section*{The 10 answers to never fumble}
+\begin{enumerate}
+\item \code{volatile} = visibility, not atomicity.
+\item Struct padding $\rightarrow$ reorder largest-first.
+\item Lock-free ring buffer = single writer per index.
+\item Lowest CAN ID wins arbitration (dominant beats recessive).
+\item Priority inversion $\rightarrow$ priority inheritance.
+\item RS422 = differential, full-duplex, noise-immune (why flight uses it).
+\item Telemetry = UDP (freshness over reliability).
+\item Median vote (odd channels) masks one fault; dual only detects.
+\item MC/DC required at DO-178B Level A.
+\item Parse wire data with shifts/masks; validate CRC/SSM before trusting it.
+\end{enumerate}
+
+\begin{keyidea}
+If you can say these ten cold, explain \emph{why} each is true, and write a ring
+buffer and a frame-parser on the whiteboard --- you are ready. Go get the offer.
+\end{keyidea}

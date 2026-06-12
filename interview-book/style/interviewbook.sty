@@ -19,6 +19,7 @@
 \RequirePackage{listings}
 \RequirePackage[most]{tcolorbox}
 \RequirePackage{fancyhdr}
+\RequirePackage{booktabs}
 \RequirePackage[hidelinks]{hyperref}
 
 \definecolor{accent}{RGB}{0,82,147}        % deep avionics blue
@@ -153,5 +154,26 @@
 
 \newtcolorbox{answerkey}{enhanced,breakable,colback=black!3,colframe=black!45,
   boxrule=0.8pt,title=\textbf{Answer key},top=4pt,bottom=4pt}
+
+% ---------- Friendly "key idea" / tip callout (breaks the density) ----------
+\newtcolorbox{keyidea}{enhanced,breakable,colback=orange!8,colframe=orange!75!black,
+  boxrule=0.9pt,title=\textbf{Key idea},top=4pt,bottom=4pt}
+
+% ---------- Part divider page (real book feel + TOC entry) ----------
+% \bookpart{A}{Title}{one-paragraph blurb}
+\newcommand{\bookpart}[3]{%
+  \clearpage
+  \thispagestyle{empty}%
+  \vspace*{\fill}%
+  \begin{tcolorbox}[enhanced,colback=accent!7,colframe=accent,boxrule=1.2pt,
+      sharp corners=south,left=14pt,right=14pt,top=14pt,bottom=14pt]
+    {\fontsize{40}{44}\selectfont\bfseries\color{accent} Part #1}\\[10pt]
+    {\LARGE\bfseries #2}\par\vspace{10pt}
+    {\normalsize\itshape #3}
+  \end{tcolorbox}%
+  \vspace*{\fill}%
+  \addcontentsline{toc}{chapter}{\protect\numberline{}\textbf{Part #1 --- #2}}%
+  \clearpage
+}
 
 \endinput

@@ -40,8 +40,9 @@ matter) on top of chapter content.
 | 16 | ch16_behavioral_company.tex | Behavioral & Company Rounds | 20 | ~3 | [~] SKELETON (company one-pagers done; personal STAR [NEEDS INTAKE]); BLOCKED on INTAKE.md |
 | 17 | ch17_mock_interviews.tex | 5 Full Mock Interviews | 20 | ~7 | [x] full topic scope |
 
-**Current compiled size:** `build/book.pdf` = **186 pages** (title + TOC +
-Chapters 1–17; Ch 15-16 are skeletons gated on INTAKE.md).
+**Current compiled size:** `build/book.pdf` = **196 pages** (title + TOC +
+Introduction + 5 Part dividers + Chapters 1–17 + Cheat-Sheet appendix;
+Ch 15-16 are skeletons gated on INTAKE.md).
 
 ## Session log
 
@@ -267,6 +268,30 @@ to approach budget without filler.
 - inputs/INTAKE.md REQUIRED fields remain unfilled. Ch 15 lists 13 [NEEDS INTAKE]
   questions (Q1-Q13); Ch 16 lists 9 (B1-B9). Fill these, then 15/16 are generated
   in full and the claim-vs-resume consistency check (PLAN.md 5.4) can run.
+
+### Session 16 — Plan-vs-book review + readability pass
+- **Audited** every chapter against PLAN.md/CLAUDE.md template: all teaching
+  chapters (1-12,14) confirmed to have Primer + 3-tier Q&A + Coding Gym +
+  resume box + scorecard; Ch13 = 60-problem bank; Ch17 = 5 mocks. Template
+  compliance: PASS.
+- **Fixed three real misses vs the plan:**
+  1. **Introduction printed (PLAN.md Section 4 miss):** added
+     `chapters/ch00_introduction.tex` ("Start Here — How to Use This Book") ---
+     warm welcome, the chapter-anatomy explainer, the readiness ladder, the
+     **12-week study plan table**, and the non-negotiable study rules. This was
+     explicitly required ("study plan ... printed as the book's introduction")
+     and was previously absent.
+  2. **Part divider pages:** added a styled `\bookpart` divider for Parts A-E
+     (big label + title + blurb, TOC entry) so the book reads as a book and the
+     density is broken up.
+  3. **Quick Reference Cheat Sheet appendix:** added
+     `chapters/ch18_cheatsheet.tex` (Appendix A) --- a friendly one-stop recap of
+     every chapter's must-know facts/formulas + "the 10 answers to never
+     fumble".
+- **Readability:** added a `keyidea` callout box; intro/cheat-sheet use a warm,
+  encouraging voice so the reader is oriented and not overwhelmed.
+- Not done (low value): no `\index` (PLAN session 18) --- skipped deliberately.
+- Compiled clean: **196 pp, zero LaTeX warnings**.
 
 ## Open flags / [VERIFY] / [NEEDS INTAKE] items
 - **Chapters 15 & 16 are HARD-BLOCKED.** Per PLAN.md Section 5 and CLAUDE.md,
