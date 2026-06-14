@@ -31,89 +31,102 @@ are missing.
 
 \begin{keyidea}
 \textbf{Keep the two employers' domains separate} --- this is what makes every
-answer consistent. \textbf{TASL (current, UAV R\&D):} UAV DFCC \& signal-
-conditioning cards, UAV LRU integration, board bring-up, RS422 Embedded C
-interface development, multi-protocol bring-up. \textbf{BEL (LCA Tejas,
-flight-critical):} DFCC verification, CCDL, SPIL, DPRAM, MIL-STD-1553B Python
-automation, DO-178B Level A. Never let CCDL/SPIL drift into the TASL story or
-the UAV board bring-up into the BEL story.
+answer consistent. \textbf{TASL (current, UAV R\&D):} UAV \emph{autopilot} and
+avionics units (TLM~50, CBLM, ERLM) on \textbf{STM32 / LPC1778 (Cortex-M)};
+embedded development, board bring-up, UAV LRU integration, multi-protocol
+(CAN/RS232/RS485/UART/Ethernet), root cause. \textbf{BEL (LCA Tejas MK1/MK1A/MK2,
+DFCC AETS):} DFCC cards, signal-conditioning cards (SCC, HSCC), single-board
+computers (SBC), \textbf{CCDL}, \textbf{SPIL}, \textbf{RS422} on \textbf{ARM9
+(LPC3250)}; DPRAM, BSP/RTSM, MIL-STD-1553B Python automation, DO-178B Level A,
+ESS/R\&D. \emph{Never} let CCDL/SPIL/DFCC/signal-conditioning drift into the TASL
+story, or STM32/autopilot/TLM50 into the BEL story.
 \end{keyidea}
 
 %=====================================================================
-\section{TASL --- UAV R\&D (Current Role)}
+\section{TASL --- UAV R\&D (Current Role): UAV Autopilot \& Avionics}
 %=====================================================================
 
-\subsection{Project 1 --- UAV DFCC Card Validation}
-\emph{Framing: Chapters 8 (avionics buses), 11 (bring-up/debug), 12 (V\&V).}
+\subsection{Project 1 --- UAV Autopilot Embedded Development (STM32 / LPC1778)}
+\emph{Framing: Chapters 1--2 (Embedded C), STM32 chapters, 4 (interrupts/timers).}
 \begin{itemize}
-\item \textbf{[NEEDS INTAKE: Q1 --- exactly what signals/parameters do you check
-  on a UAV DFCC card, and the pass/fail criteria?]}
-\item \textbf{[NEEDS INTAKE: Q2 --- one real defect you found and how it was
-  resolved (symptom, root cause, fix, how verified)?]}
+\item \textbf{[NEEDS INTAKE: T1 --- what Embedded C firmware do you develop/
+  integrate on STM32 and LPC1778 for the autopilot (which peripherals/functions)?]}
+\item \textbf{[NEEDS INTAKE: T2 --- one real thing you built, debugged, or fixed,
+  and how you verified it?]}
 \end{itemize}
 
-\subsection{Project 2 --- AETS-DFCC Signal-Conditioning Card Integration}
-\emph{Framing: Chapters 11 (lab/debug), 10 (signal/sensor), 8.}
+\subsection{Project 2 --- UAV Avionics Units Integration (TLM~50 / CBLM / ERLM)}
+\emph{Framing: Chapters 5--9 (protocols), 11 (bring-up/debug).}
 \begin{itemize}
-\item \textbf{[NEEDS INTAKE: Q3 --- which sensor/analog signals does the SC card
-  condition, and what do you verify on the acquisition/conditioning path?]}
-\item \textbf{[NEEDS INTAKE: Q4 --- which instruments (oscilloscope, DMM,
-  electronic load) and what measurements?]}
+\item \textbf{[NEEDS INTAKE: T3 --- what are TLM~50, CBLM, ERLM (expand the
+  acronyms) and what do you do with each (integrate, test, validate)?]}
+\item \textbf{[NEEDS INTAKE: T4 --- which interfaces/protocols connect them and
+  what you verify?]}
 \end{itemize}
 
 \subsection{Project 3 --- UAV LRU Integration \& Board Bring-up}
-\emph{Framing: Chapters 11 (bring-up sequence), 3 (boards/MCU), 4--8 (interfaces).}
+\emph{Framing: Chapters 11 (bring-up sequence), STM32 chapters, 4--9 (interfaces).}
 \begin{itemize}
-\item \textbf{[NEEDS INTAKE: Q5 --- which boards do you bring up (autopilot
-  v2.2/4.0/4.1/6.1, PDU, IRNSS, VMNSC, baseboard) and what's your bring-up
-  sequence with ST-Link/J-Link?]}
-\item \textbf{[NEEDS INTAKE: Q6 --- which LRUs do you integrate (PSU200, AU, AIU,
+\item \textbf{[NEEDS INTAKE: T5 --- which boards do you bring up (autopilot
+  v2.2/4.0/4.1/6.1, PDU, IRNSS, VMNSC, baseboard) and your ST-Link/J-Link
+  bring-up sequence?]}
+\item \textbf{[NEEDS INTAKE: T6 --- which LRUs do you integrate (PSU200, AU, AIU,
   INSU, CAN servos, radio, pitot/Laversab) and what does integration involve?]}
 \end{itemize}
 
-\subsection{Project 4 --- RS422 Embedded C Interface Development}
-\emph{Framing: Chapters 1 (Embedded C), 5 (RS422).}
+\subsection{Project 4 --- Multi-Protocol Bring-up \& Root-Cause Analysis}
+\emph{Framing: Chapters 7 (CAN), 5 (serial), 13 (debugging/lab).}
 \begin{itemize}
-\item \textbf{[NEEDS INTAKE: Q7 --- what do the RS422 Embedded C interface/test
-  routines you write actually do (interface code? test harness? what function)?]}
-\item \textbf{[NEEDS INTAKE: Q8 --- roughly how much code, on what target, and
-  how is it verified?]}
+\item \textbf{[NEEDS INTAKE: T7 --- which protocols (CAN/RS232/RS485/UART/
+  Ethernet) do you bring up and validate, and a real fault you root-caused?]}
+\item \textbf{[NEEDS INTAKE: T8 --- which instruments and how you isolate
+  hardware vs software causes?]}
 \end{itemize}
 
 %=====================================================================
-\section{BEL --- LCA Tejas, Flight-Critical Avionics (Previous Role)}
+\section{BEL --- LCA Tejas MK1/MK1A/MK2, DFCC AETS (Previous Role)}
 %=====================================================================
 
-\subsection{Project 5 --- CCDL Verification}
+\subsection{Project 5 --- DFCC Cards, SCC / HSCC \& SBC Verification}
+\emph{Framing: Chapters 8 (avionics buses), 11 (bring-up/debug), 14 (V\&V).}
+\begin{itemize}
+\item \textbf{[NEEDS INTAKE: B1 --- what do you verify on the DFCC cards, the
+  signal-conditioning cards (SCC, HSCC --- expand), and the SBC; pass/fail
+  criteria?]}
+\item \textbf{[NEEDS INTAKE: B2 --- one real defect found and resolved (symptom,
+  root cause, fix, verification)?]}
+\end{itemize}
+
+\subsection{Project 6 --- CCDL Verification}
 \emph{Framing: Chapter 8 (CCDL, voting, failover), Chapter 10 (redundant control).}
 \begin{itemize}
-\item \textbf{[NEEDS INTAKE: Q9 --- what specifically do you verify on the CCDL
-  (which data, what timing bound, what failover/redundancy behaviour), and how?]}
-\item \textbf{[NEEDS INTAKE: Q10 --- any concrete number: frame rate, latency
+\item \textbf{[NEEDS INTAKE: B3 --- what specifically do you verify on the CCDL
+  (which data, timing bound, failover/redundancy behaviour), and how?]}
+\item \textbf{[NEEDS INTAKE: B4 --- any concrete number: frame rate, latency
   bound, channel count? Only if real.]}
 \end{itemize}
 
-\subsection{Project 6 --- SPIL Verification}
+\subsection{Project 7 --- SPIL Verification (over RS422)}
 \emph{Framing: Chapters 5 (serial/RS422), 8 (serial inter-card links).}
 \begin{itemize}
-\item \textbf{[NEEDS INTAKE: Q11 --- what does the SPIL link carry, and what do
+\item \textbf{[NEEDS INTAKE: B5 --- what does the SPIL link carry, and what do
   you test at the packet level (framing, integrity, timing, loss behaviour)?]}
-\item \textbf{[NEEDS INTAKE: Q12 --- the tools and the exact diagnostics you run?]}
+\item \textbf{[NEEDS INTAKE: B6 --- the tools and the exact diagnostics you run?]}
 \end{itemize}
 
-\subsection{Project 7 --- DPRAM Architecture Validation}
-\emph{Framing: Chapter 9 (DPRAM handshake), 4 (shared data), 3 (ARM9/LPC3250).}
+\subsection{Project 8 --- DPRAM Architecture Validation (LPC3250 / ARM9)}
+\emph{Framing: Chapter 9 (DPRAM handshake), 4 (shared data), 3 (ARM9).}
 \begin{itemize}
-\item \textbf{[NEEDS INTAKE: Q13 --- the real-time DPRAM polling architecture you
+\item \textbf{[NEEDS INTAKE: B7 --- the real-time DPRAM polling architecture you
   validated: what data/command handshakes, what made it sub-1\,ms, your role?]}
-\item \textbf{[NEEDS INTAKE: Q14 --- the white-box firmware testing on LPC3250
-  (ARM9): what you actually tested and found; the BSP/RTSM/driver work?]}
+\item \textbf{[NEEDS INTAKE: B8 --- the white-box firmware testing on LPC3250:
+  what you tested/found; the BSP/RTSM/driver work?]}
 \end{itemize}
 
-\subsection{Project 8 --- MIL-STD-1553B Python Automation}
+\subsection{Project 9 --- MIL-STD-1553B Python Automation}
 \emph{Framing: Chapters 14 (Python automation), 8 (1553B), 12 (V\&V).}
 \begin{itemize}
-\item \textbf{[NEEDS INTAKE: Q15 --- the Python suite: what it parsed (1553B /
+\item \textbf{[NEEDS INTAKE: B9 --- the Python suite: what it parsed (1553B /
   RS422), how it was built, how the about-60\% number was measured (baseline vs
   after)?]}
 \end{itemize}

@@ -29,20 +29,20 @@
 
 % --- PROFESSIONAL SUMMARY ---
 \section*{Professional Summary}
-Embedded Systems Engineer working across UAV R\&D and flight-critical avionics, focused on embedded development support, hardware--software integration, board bring-up, debugging, and validation. In the UAV R\&D division at Tata Advanced Systems Limited, develops Embedded C interface and test routines over RS422, brings up and debugs autopilot and supporting boards with ST-Link/J-Link, and integrates the UAV Digital Flight Control Computer (DFCC) and AETS-DFCC signal-conditioning cards across the UAV LRU set --- with multi-protocol interfacing (CAN, RS232, RS422, RS485, UART, Ethernet) and oscilloscope/DMM/electronic-load root-cause analysis. Previously, at Bharat Electronics on the LCA Tejas program, verified the Digital Flight Control Computer (DFCC), Cross-Channel Data Link (CCDL), and SPIL serial data link, validated a real-time DPRAM architecture on ARM9 (LPC3250), and built a Python automation suite (MIL-STD-1553B / RS422 packet parsing) that cut manual regression effort by 60\%, under DO-178B Level A. Combines embedded engineering and avionics integration with rigorous verification and validation.
+Embedded Systems Engineer working across UAV R\&D and flight-critical avionics, focused on embedded development, hardware--software integration, board bring-up, debugging, and validation. In the UAV R\&D division at Tata Advanced Systems Limited, develops and integrates Embedded C firmware on STM32 and LPC1778 (Cortex-M) for UAV autopilot and avionics units (TLM~50, CBLM, ERLM); brings up and debugs autopilot and supporting boards with ST-Link/J-Link; and performs hardware--software integration across the UAV LRU set with multi-protocol interfacing (CAN, RS232, RS485, UART, Ethernet) and oscilloscope/DMM/electronic-load root-cause analysis. Previously, at Bharat Electronics on the LCA Tejas (MK1 / MK1A / MK2) DFCC AETS program, verified DFCC cards, signal-conditioning cards (SCC, HSCC), and single-board computers (SBC), and the redundant data links --- CCDL and SPIL over RS422; validated a real-time DPRAM architecture on ARM9 (LPC3250); and built a Python automation suite (MIL-STD-1553B / RS422 packet parsing) that cut manual regression effort by 60\%, under DO-178B Level A. Combines embedded engineering and avionics integration with rigorous verification and validation.
 
 % --- CORE COMPETENCIES ---
 \section*{Core Competencies}
-Embedded Systems \& Firmware (Embedded C) \;\textbullet\; Hardware--Software Integration (HSI) \;\textbullet\; UAV Flight Control Systems \;\textbullet\; Avionics Integration \;\textbullet\; Board Bring-up \& Debugging \;\textbullet\; Device Drivers \& BSP \;\textbullet\; RS422/CAN Multi-Protocol Interfacing \;\textbullet\; Signal Conditioning \;\textbullet\; Data Link Verification (CCDL/SPIL) \;\textbullet\; Real-Time Systems \;\textbullet\; Root Cause Analysis \;\textbullet\; Verification \& Validation (DO-178B)
+Embedded Systems \& Firmware (Embedded C) \;\textbullet\; STM32 / Cortex-M Development \;\textbullet\; Hardware--Software Integration (HSI) \;\textbullet\; UAV Autopilot \& Flight Control \;\textbullet\; Board Bring-up \& Debugging \;\textbullet\; Device Drivers \& BSP \;\textbullet\; Multi-Protocol Interfacing (CAN/RS422/UART) \;\textbullet\; Signal Conditioning \;\textbullet\; Data Link Verification (CCDL/SPIL) \;\textbullet\; Real-Time Systems \;\textbullet\; Root Cause Analysis \;\textbullet\; Verification \& Validation (DO-178B)
 
 % --- TECHNICAL SKILLS ---
 \section*{Technical Skills}
 \textbf{Embedded \& Firmware:} Embedded C, C++, Python (automation \& packet parsing), Shell Scripting, Linux; device drivers, Board Support Packages (BSP), board bring-up\\
-\textbf{Platforms \& Architecture:} ARM9 (LPC3250), ARM microcontrollers, RTOS (Xenomai), Dual-Port RAM (DPRAM), FPGA interfacing, autopilot/flight-control boards\\
+\textbf{Platforms \& Architecture:} STM32 (Cortex-M), LPC1778 (Cortex-M3), ARM9 (LPC3250), ARM microcontrollers, RTOS (Xenomai), Dual-Port RAM (DPRAM), FPGA interfacing, autopilot/flight-control boards\\
 \textbf{Protocols \& Data Links:} CAN Bus, RS422, RS232, RS485, UART, SPI, I2C, Ethernet (TCP/IP, UDP), MIL-STD-1553B, ARINC 429, Cross Channel Data Link (CCDL), SPIL, telemetry packet parsing\\
 \textbf{Debug \& Programming Interfaces:} ST-Link, J-Link, JTAG/SWD\\
 \textbf{Lab Instruments:} Oscilloscopes, logic analyzers, DMM, electronic load, bench power supplies (Keysight \& APLAB), Laversab pitot-static tester, HIL simulators\\
-\textbf{Software \& IDEs:} Keil uVision, VS Code, Visual Studio, MATLAB/Simulink, Git, LDRA, SAP QM\\
+\textbf{Software \& IDEs:} STM32CubeIDE/CubeMX, Keil uVision, VS Code, Visual Studio, MATLAB/Simulink, Git, LDRA, SAP QM\\
 \textbf{Standards \& Processes:} DO-178B Level A, Requirements Traceability, ATP/QTP, MIL-STD-461, MIL-STD-810, AS9100\\
 \textbf{V\&V Capabilities:} White-/black-box testing, HSI testing, fault isolation, root cause analysis, regression \& test automation
 
@@ -52,25 +52,24 @@ Embedded Systems \& Firmware (Embedded C) \;\textbullet\; Hardware--Software Int
 \textbf{Tata Advanced Systems Limited (TASL) --- UAV R\&D Division} \hfill Bangalore, India\\
 \textit{Embedded Systems Engineer (deployed via Valentra)} \hfill Jan 2026 -- Present
 
-\textbf{Key Project: UAV Flight Control Computer \& LRU Integration (DFCC / Signal Conditioning / Board Bring-up)}
+\textbf{Key Project: UAV Autopilot \& Avionics --- Embedded Development, Board Bring-up \& Integration (STM32 / LPC1778)}
 \begin{itemize}
-    \item Develop Embedded C interface and test routines for RS422 card-to-card communication on UAV flight-computer hardware, supporting card-level data exchange and validation.
+    \item Develop, integrate, and validate Embedded C firmware on STM32 and LPC1778 (Cortex-M) for UAV autopilot and avionics units (TLM~50, CBLM, ERLM).
     \item Flash, bring up, and debug embedded targets with ST-Link and J-Link across multiple autopilot board generations (v2.2, v4.0, v4.1, v6.1) and supporting boards (PDU, IRNSS, VMNSC, baseboard).
-    \item Integrate the UAV DFCC (Digital Flight Control Computer) and AETS-DFCC signal-conditioning (SC) cards; perform board-level functional verification, fault isolation, and analog acquisition/conditioning checks using oscilloscopes, DMMs, and electronic loads.
     \item Perform hardware--software integration across UAV LRUs --- PSU200, Avionics Unit (AU), Analog Interface Unit (AIU), INSU, CAN servos, radio units, and pitot-static systems (Laversab).
     \item Bring up and validate multi-protocol interfaces (CAN, RS232, RS485, UART, Ethernet), including connector-level checks (circular, Harwin) during hardware integration.
-    \item Perform root-cause analysis of board- and interface-level issues, isolating faults across the hardware--software boundary.
+    \item Perform board- and interface-level root-cause analysis with oscilloscopes, DMMs, and electronic loads, isolating faults across the hardware--software boundary.
 \end{itemize}
 
 \vspace{4pt}
 \textbf{Bharat Electronics Limited (BEL)} \hfill Bangalore, India\\
 \textit{R\&D Engineer --- Avionics (Embedded Systems, Integration \& V\&V)} \hfill Nov 2023 -- Jan 2026
 
-\textbf{Flight Control System --- LCA Tejas (Fighter Aircraft)}
+\textbf{DFCC AETS Program --- LCA Tejas (MK1 / MK1A / MK2, Fighter Aircraft)}
 \begin{itemize}
-    \item Verified the LCA Tejas Digital Flight Control Computer (DFCC) and its redundant data links --- Cross Channel Data Link (CCDL) and the SPIL serial data link --- checking data integrity, timing, and redundancy/failover behavior against DO-178B Level A requirements.
+    \item Verified Digital Flight Control Computer (DFCC) cards, signal-conditioning cards (SCC, HSCC), and single-board computers (SBC), and the redundant data links --- Cross Channel Data Link (CCDL) and the SPIL serial data link over RS422 --- checking data integrity, timing, and redundancy/failover behavior against DO-178B Level A requirements.
     \item Executed Hardware--Software Integration (HSI) testing on embedded ARM processor cards; identified and resolved complex timing defects between the operational flight program and hardware interfaces, with PCB- and LRU-level fault isolation.
-    \item Maintained 100\% requirements-to-test traceability with ATP/QTP documentation under DO-178B Level A.
+    \item Maintained 100\% requirements-to-test traceability with ATP/QTP documentation under DO-178B Level A; contributed to ESS and avionics R\&D activities.
 \end{itemize}
 
 \textbf{Firmware \& Embedded Development}

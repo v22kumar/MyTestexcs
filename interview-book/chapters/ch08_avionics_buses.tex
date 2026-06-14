@@ -16,9 +16,10 @@ $\rightarrow$ Ethernet TCP vs UDP for telemetry $\rightarrow$ redundancy \&
 cross-channel data links (voting, failover --- the CCDL family) $\rightarrow$
 generic serial processing links (SPIL-type) $\rightarrow$ telemetry packet
 structure \& parsing. This chapter maps directly onto the resume: at \textbf{BEL}
-(LCA Tejas), MIL-STD-1553B/RS422 telemetry parsing and CCDL \& SPIL verification;
-at \textbf{TASL} (UAV R\&D), DFCC and signal-conditioning card integration and the
-UAV LRU set.
+(LCA Tejas MK1/MK1A/MK2, DFCC AETS), MIL-STD-1553B/RS422 telemetry parsing and
+DFCC / CCDL / SPIL verification. (At \textbf{TASL} the current UAV work is
+autopilot/STM32/LPC1778 embedded development and LRU integration --- a different
+domain; keep the two separate.)
 \end{partnote}
 
 Where CAN (Chapter 7) is the vehicle/robotics bus, these are the
@@ -785,11 +786,12 @@ I test it at the packet level --- framing, integrity, timing, and behaviour
 under loss --- the same byte-level rigour I apply to every serial interface.''
 
 \medskip
-\small Maps directly to the resume: at BEL (LCA Tejas) --- 1553B/RS422 telemetry
-parsing, the Python automation, and CCDL \& SPIL verification under DO-178B Level
-A. (At TASL the avionics work is UAV DFCC / signal-conditioning / LRU
-integration.) Keep claims to what the resume states; the deep, defensible project
-scripting is Chapter 15, built only from \code{inputs/INTAKE.md}.
+\small Maps directly to the resume: at BEL (LCA Tejas, DFCC AETS) --- 1553B/RS422
+telemetry parsing, the Python automation, and DFCC / CCDL / SPIL verification
+under DO-178B Level A. (At TASL the work is UAV autopilot / STM32 / LPC1778
+embedded development and LRU integration.) Keep claims to what the resume states;
+the deep, defensible project scripting is Chapter 15, built only from
+\code{inputs/INTAKE.md}.
 \end{resumelink}
 
 %=====================================================================
